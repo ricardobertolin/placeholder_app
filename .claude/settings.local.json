@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C \"c:/Users/ricar/Documentos/_PROJETOS/_GitPages/placeholder_app\" status)",
+      "Bash(git -C \"c:/Users/ricar/Documentos/_PROJETOS/_GitPages/placeholder_app\" branch -a)",
+      "Bash(git -C \"c:/Users/ricar/Documentos/_PROJETOS/_GitPages/placeholder_app\" status --ignored --untracked-files=all)",
+      "Bash(git -C \"c:/Users/ricar/Documentos/_PROJETOS/_GitPages/placeholder_app\" check-ignore -v index.html app.js sw.js styles.css icon.svg manifest.webmanifest .nojekyll)",
+      "Bash(git -C \"c:/Users/ricar/Documentos/_PROJETOS/_GitPages/placeholder_app\" ls-files)",
+      "Bash(git -C \"c:/Users/ricar/Documentos/_PROJETOS/_GitPages/placeholder_app\" config --get core.excludesfile)",
+      "Bash(git -C \"c:/Users/ricar/Documentos/_PROJETOS/_GitPages/placeholder_app\" log --oneline --all)",
+      "Bash(git -C \"c:/Users/ricar/Documentos/_PROJETOS/_GitPages/placeholder_app\" show --stat HEAD)",
+      "Bash(git -C \"c:/Users/ricar/Documentos/_PROJETOS/_GitPages/placeholder_app\" branch placeholder)",
+      "Bash(git -C \"c:/Users/ricar/Documentos/_PROJETOS/_GitPages/placeholder_app\" branch -vv)"
+    ]
+  }
+}
