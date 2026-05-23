@@ -811,7 +811,9 @@
     spinT: 0,           // Gun Twirl animation timer (counts down)
     spinDmg: false,     // true while a max-level twirl's double-damage shot is pending
   };
-  // Multiplayer companion — same shape as player, arrow-key driven, no gun.
+  // Network-driven second player — a real actor: wolves target it, it takes
+  // hits and dies. Hats / hurtT are authoritative on the host and synced down
+  // to the guest, who reads their own hats from `playerHats` (host echoes it).
   const player2 = {
     x: 0, y: 0,
     speed: 4.0,
@@ -820,6 +822,8 @@
     walkT: 0,
     moving: false,
     active: false,      // flipped on when multiplayer is chosen
+    hats: 3,            // health — overwritten by START_HATS on game start
+    hurtT: 0,           // hit flash timer (visual)
   };
   // Run mechanic — walking with no shots and no reload builds a little momentum.
   const RUN_WARMUP = 1.0;     // seconds of walking before the sprint kicks in
@@ -946,6 +950,9 @@
   let wolfLevelCap = 0; // global, non-deterministic cap that can grow per wave
   let gameOver = false;
   let gameOverMsg = '';
+  // In multiplayer, 'host' or 'guest' identifies which keeper fell, so each
+  // client can pick the right wording (you vs. partner).
+  let gameOverCause = '';
   let waveActive = false;
   let waveAutoStartPaused = false;
   let pendingSpawns = 0; // wolves scheduled but not yet spawned (across all live waves)
@@ -1494,6 +1501,7 @@
   }
 
   function selectUpgrade(index) {
+    if (multiplayer && !isHost) return; // host picks; guest only watches
     if (!upgradeMode || upgradePicked) return;
     const option = upgradeOptions[index];
     if (!option) return;
@@ -2294,6 +2302,15 @@
   }
 
   // ---------- AI ----------
+  // Whichever keeper is closer to (x,y) — used by wolves so they can chase
+  // either player. In single-player there is only the host's keeper.
+  function nearestKeeper(x, y) {
+    if (!player2.active) return player;
+    const d1 = dist2(x, y, player.x, player.y);
+    const d2 = dist2(x, y, player2.x, player2.y);
+    return d2 < d1 ? player2 : player;
+  }
+
   // Guard-dog AI: charge the nearest wolf and bite it; idle near the chickens
   // when the field is clear. Speed and bite damage scale with the upgrade level.
   function updateDog(d, dt) {
@@ -2568,9 +2585,10 @@
         if (d < nd) { nd = d; target = c; }
       }
     }
-    // If player is much closer and threatening, sometimes harass them
-    const dp = dist2(player.x, player.y, w.x, w.y);
-    if (!target || dp < 4) target = target && nd < dp * 0.5 ? target : (dp < 9 ? player : target || player);
+    // If either keeper is closer and threatening, sometimes harass them.
+    const candidate = nearestKeeper(w.x, w.y);
+    const dp = dist2(candidate.x, candidate.y, w.x, w.y);
+    if (!target || dp < 4) target = target && nd < dp * 0.5 ? target : (dp < 9 ? candidate : target || candidate);
 
     if (w.playerFocusT > 0) {
       w.playerFocusT = Math.max(0, w.playerFocusT - dt);
@@ -2579,10 +2597,11 @@
       w.playerFocusT = 1.2;
     }
     if (w.playerFocusT > 0 || w.assassin) {
-      target = player;
+      target = candidate;
     }
 
-    if (target === player) {
+    const targetIsPlayer = (target === player || target === player2);
+    if (targetIsPlayer) {
       w.aggroT = 0.4;
     } else if (w.aggroT > 0) {
       w.aggroT = Math.max(0, w.aggroT - dt);
@@ -2592,11 +2611,10 @@
       const m = Math.hypot(dx, dy) || 1;
       const atkRange = w.sword ? 1.05 : 0.6; // sword wolves reach a bit further
       const baseSpeed = 2.6;
-      // Meat Bait / Wolf Repellent also tweak speed while charging the player.
-      let spd = baseSpeed * (w.speedMul || 1) * (target === player ? wolfRushSpeed : 1);
-      // Assassins are capped at the player's full-sprint speed — they can keep
-      // pace with a sprinting player but never outrun one.
-      if (w.assassin) spd = Math.min(spd, player.speed * (1 + tableAt('sprint')));
+      // Meat Bait / Wolf Repellent also tweak speed while charging a keeper.
+      let spd = baseSpeed * (w.speedMul || 1) * (targetIsPlayer ? wolfRushSpeed : 1);
+      // Assassins are capped at their target keeper's full-sprint speed.
+      if (w.assassin) spd = Math.min(spd, (target.speed || player.speed) * (1 + tableAt('sprint')));
       // Steer around fences: when one blocks the way ahead, commit to skirting
       // along whichever side leads back toward the target.
       let ux = dx / m, uy = dy / m;
@@ -2678,6 +2696,7 @@
               if (playerHats <= 0) {
                 if (!tryKarmaResurrect()) {
                   gameOver = true;
+                  gameOverCause = 'host';
                   gameOverMsg = 'A wolf knocked off your last hat! Press F5 to restart.';
                 }
               } else {
@@ -2686,6 +2705,17 @@
             }
             // Melee counter — a chance to strike the attacker back.
             if (!gameOver && Math.random() < tableAt('counter')) meleeCounter(w);
+          } else if (target === player2) {
+            shake = 0.18;
+            player2.hurtT = 0.22;
+            player2.hats--;
+            if (player2.hats <= 0) {
+              gameOver = true;
+              gameOverCause = 'guest';
+              gameOverMsg = 'Your partner fell to a wolf! Press F5 to restart.';
+            } else {
+              toast('Partner got hit! ' + player2.hats + ' hats left', 1.2);
+            }
           } else if (target.alive) {
             target.alive = false;
             playChickenDeath();
@@ -3112,6 +3142,7 @@
     if (player.jamT > 0) player.jamT -= dt;
     if (player.hurtT > 0) player.hurtT -= dt;
     if (player.meleeT > 0) player.meleeT -= dt;
+    if (player2.hurtT > 0) player2.hurtT -= dt;
 
     if (keys['r']) { keys['r'] = false; tryReload(); }
     if (reloadingT > 0) {
@@ -3268,7 +3299,8 @@
     ctx.restore();
 
     if (upgradeMode) {
-      drawUpgradeWindow();
+      if (multiplayer && !isHost) drawUpgradeWaitOverlay();
+      else drawUpgradeWindow();
     }
 
     if (paused) {
@@ -3283,7 +3315,15 @@
       ctx.font = 'bold 48px system-ui';
       ctx.fillText('GAME OVER', W/2, H/2 - 20);
       ctx.font = '20px system-ui';
-      ctx.fillText(gameOverMsg, W/2, H/2 + 20);
+      // In multiplayer, pick the message from THIS client's POV.
+      let msg = gameOverMsg;
+      if (multiplayer && gameOverCause) {
+        const youDied = (gameOverCause === 'host' && isHost) || (gameOverCause === 'guest' && !isHost);
+        msg = youDied
+          ? 'A wolf knocked off your last hat! Press F5 to restart.'
+          : 'Your partner fell to a wolf! Press F5 to restart.';
+      }
+      ctx.fillText(msg, W/2, H/2 + 20);
     }
   }
 
@@ -3585,6 +3625,31 @@
     }
     ctx.closePath();
     ctx.fill();
+  }
+
+  // Shown on the guest while the host is in their upgrade screen — read-only
+  // hint so the guest knows what's happening instead of a frozen world.
+  function drawUpgradeWaitOverlay() {
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, W, H);
+    const w = Math.min(360, W - 24);
+    const h = 96;
+    const x = (W - w) / 2;
+    const y = (H - h) / 2;
+    ctx.fillStyle = 'rgba(15,18,24,0.96)';
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = '#ffd166';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+    ctx.fillStyle = '#ffd166';
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 22px system-ui';
+    ctx.fillText('Wave cleared', W / 2, y + 38);
+    ctx.fillStyle = '#d7d7d7';
+    ctx.font = '14px system-ui';
+    ctx.fillText('Host is choosing an upgrade…', W / 2, y + 66);
+    ctx.restore();
   }
 
   function drawUpgradeWindow() {
@@ -4181,7 +4246,8 @@
     ctx.fill();
   }
 
-  // Second player — drawn like the keeper but with a blue shirt and no gun/hats.
+  // Second player — drawn like the keeper but in blue. Carries its own hat
+  // stack as health, flashes red when hit.
   function drawPlayer2() {
     drawShadow(player2.x, player2.y, 0.3);
     const p = worldToScreen(player2.x, player2.y);
@@ -4192,25 +4258,31 @@
     ctx.translate(cx, cy);
     ctx.scale(PLAYER_SCALE, PLAYER_SCALE);
     ctx.translate(-cx, -cy);
-    // Body — distinct blue so the two players are easy to tell apart.
-    ctx.fillStyle = '#3a6ea5';
+    const hurt = player2.hurtT > 0;
+    // Body — blue shirt by default, red flash on hit.
+    ctx.fillStyle = hurt ? '#ff5555' : '#3a6ea5';
     roundedRect(cx - 7, cy - 25, 14, 17, 3);
     // Head
-    ctx.fillStyle = '#f1c27d';
+    ctx.fillStyle = hurt ? '#ff8a8a' : '#f1c27d';
     ctx.beginPath();
     ctx.arc(cx, cy - 30, 6, 0, Math.PI * 2);
     ctx.fill();
-    // A single straw hat so they look like a partner keeper.
-    ctx.fillStyle = '#caa24a';
-    ctx.beginPath();
-    ctx.ellipse(cx, cy - 34, 8, 2.5, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillRect(cx - 5, cy - 38, 10, 4);
+    // Hat stack — same mechanic as player1: one per remaining HP.
+    const HAT_STEP = 5;
+    const hatCount = Math.max(0, player2.hats || 0);
+    for (let i = 0; i < hatCount; i++) {
+      const by = cy - 34 - i * HAT_STEP;
+      ctx.fillStyle = hurt ? '#c0392b' : '#5a3825';
+      ctx.beginPath();
+      ctx.ellipse(cx, by, 8, 2.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillRect(cx - 5, by - 4, 10, 4);
+    }
     // Legs — alternate lifting while walking
     const legPhase = player2.moving ? Math.sin(player2.walkT) : 0;
     const lLift = Math.max(0, legPhase) * 2;
     const rLift = Math.max(0, -legPhase) * 2;
-    ctx.fillStyle = '#222';
+    ctx.fillStyle = hurt ? '#7a1a1a' : '#222';
     ctx.fillRect(cx - 5, cy - 10, 3, 8 - lLift);
     ctx.fillRect(cx + 2, cy - 10, 3, 8 - rLift);
     ctx.restore();
@@ -5076,6 +5148,8 @@
       // Spawn the second player a couple of tiles away so they don't overlap P1.
       player2.x = player.x + 1.5;
       player2.y = player.y + 0.5;
+      player2.hats = START_HATS;
+      player2.hurtT = 0;
       // Send an initial position immediately so the peer can place us right away.
       netSendT = 0;
     } else {
@@ -5224,7 +5298,15 @@
     try {
       conn.send({
         type: 'snapshot',
-        host: { x: player.x, y: player.y, dir: player.dir, moving: !!player.moving, walkT: player.walkT },
+        // Host's own keeper + the guest's keeper, both authoritative.
+        host: {
+          x: player.x, y: player.y, dir: player.dir, moving: !!player.moving,
+          walkT: player.walkT, hats: playerHats, hurtT: player.hurtT,
+        },
+        guest: { hats: player2.hats, hurtT: player2.hurtT },
+        // Mirror the host's overlay state so the guest's render matches.
+        upgradeMode: upgradeMode,
+        paused: paused,
         wolves:   snapList(wolves,   SNAP_FIELDS.wolves),
         chickens: snapList(chickens, SNAP_FIELDS.chickens),
         coops:    snapList(coops,    SNAP_FIELDS.coops),
@@ -5243,6 +5325,7 @@
         mapSize: MAP_SIZE,
         gameOver: gameOver,
         gameOverMsg: gameOverMsg,
+        gameOverCause: gameOverCause,
       });
     } catch (e) { /* channel may be mid-teardown */ }
   }
@@ -5260,7 +5343,22 @@
       player2.dir = msg.host.dir;
       player2.moving = !!msg.host.moving;
       player2.walkT = msg.host.walkT;
+      // Host's hat count drives how player2 is drawn on the guest.
+      if (typeof msg.host.hats === 'number') player2.hats = msg.host.hats;
+      if (typeof msg.host.hurtT === 'number') player2.hurtT = msg.host.hurtT;
     }
+    // Host echoes the guest's own hat count back so the guest sees its damage.
+    if (msg.guest) {
+      if (typeof msg.guest.hats === 'number') {
+        playerHats = msg.guest.hats;
+        // Trim/pad the local hat-colour stack to match.
+        while (hatColors.length > playerHats) hatColors.pop();
+        while (hatColors.length < playerHats) hatColors.push('#5a3825');
+      }
+      if (typeof msg.guest.hurtT === 'number') player.hurtT = msg.guest.hurtT;
+    }
+    // Mirror the host's overlay state (upgrade panel currently open, paused).
+    upgradeMode = !!msg.upgradeMode;
     replaceArray(wolves,   msg.wolves);
     replaceArray(chickens, msg.chickens);
     replaceArray(coops,    msg.coops);
@@ -5278,6 +5376,7 @@
     waveTimer = msg.waveTimer;
     gameOver = !!msg.gameOver;
     gameOverMsg = msg.gameOverMsg || '';
+    gameOverCause = msg.gameOverCause || '';
     // The host's map grows as they place coops; mirror the new bounds and
     // regenerate the forest border so the guest's render matches.
     if (msg.mapSize !== MAP_SIZE) {
