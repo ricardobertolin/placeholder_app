@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -14,10 +14,18 @@
     height: 100%;
     background: #1a1a1a;
     overflow: hidden;
-    font-family: system-ui, sans-serif;
+    /* Chunky monospace face — matches the low-res pixel canvas. */
+    font-family: 'Lucida Console', 'Consolas', 'Courier New', monospace;
     color: #fff;
     user-select: none;
+    /* Try to suppress font smoothing so text reads as crisp pixels. */
+    -webkit-font-smoothing: none;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: geometricPrecision;
   }
+  /* Toggleable full-screen pixelation. Heavy — re-rasterises everything
+     each frame the canvas updates — so it lives behind a debug switch. */
+  body.pixelate-all { filter: url(#pixelate); }
   #game {
     display: block;
     width: 100vw;
@@ -32,15 +40,19 @@
     top: 12px;
     left: 12px;
     background: rgba(0,0,0,0.55);
-    padding: 10px 14px;
+    padding: 12px 16px;
     border-radius: 0;
-    font-size: 14px;
-    line-height: 1.5;
+    font-size: 18px;
+    line-height: 1.55;
     pointer-events: none;
+    letter-spacing: 1px;
   }
   #hud b { color: #ffd166; }
   #hud .stat { display: inline-block; min-width: 60px; }
   #help {
+    /* Hidden — the in-game key cheatsheet was cluttering the corner.
+       Re-enable by removing display:none below. */
+    display: none;
     position: fixed;
     bottom: 12px;
     left: 12px;
@@ -66,13 +78,15 @@
     top: 12px;
     left: 50%;
     transform: translateX(-50%);
-    background: rgba(0,0,0,0.75);
-    padding: 24px 40px;
+    background: rgba(15, 18, 24, 0.92);
+    border: 3px solid #ffd166;
+    padding: 18px 32px;
     border-radius: 0;
-    font-size: 22px;
+    font-size: 18px;
+    letter-spacing: 1px;
     pointer-events: none;
     opacity: 0;
-    transition: opacity 0.3s;
+    transition: opacity 0.2s;
   }
   #toast.show { opacity: 1; }
 
@@ -82,55 +96,69 @@
     top: 12px;
     right: 12px;
     background: rgba(0,0,0,0.6);
-    padding: 6px 8px;
+    padding: 10px 12px;
     border-radius: 0;
-    font-size: 12px;
+    font-size: 17px;
     z-index: 10;
-    max-width: 320px;
+    max-width: 280px;
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
   }
   #debug-toggle {
     background: #ff6b6b;
     color: #fff;
     border: none;
-    padding: 4px 10px;
+    padding: 6px 12px;
     border-radius: 0;
     cursor: pointer;
     font-weight: bold;
     font-family: inherit;
+    font-size: 16px;
   }
   #debug-body { margin-top: 8px; display: none; }
   #debug.open #debug-body { display: block; }
   #debug .debug-row {
+    /* Stack vertically — each row is a label + a list of buttons. */
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: stretch;
     gap: 4px;
-    margin-bottom: 4px;
-    flex-wrap: wrap;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #333;
   }
+  #debug .debug-row:last-child { border-bottom: none; margin-bottom: 0; }
   #debug .debug-label {
     color: #ffd166;
     font-weight: bold;
-    min-width: 58px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 2px;
   }
   #debug button[data-debug] {
+    display: block;
+    width: 100%;
     background: #2a2a2a;
     color: #fff;
     border: 1px solid #555;
     border-radius: 0;
-    padding: 2px 6px;
-    font-size: 11px;
+    padding: 6px 10px;
+    font-size: 16px;
     cursor: pointer;
     font-family: inherit;
+    text-align: left;
   }
   #debug button[data-debug]:hover { background: #444; }
 
-  /* ── Title menu ─────────────────────────────────── */
+  /* ── Title menu ─────────────────────────────────────────────────────────
+     Styled to feel like the in-game upgrade/pause panels: same dark fill,
+     gold border, system-ui font. The body underneath stays the live world,
+     so the menu reads as a pause-overlay rather than a title screen. */
   #menu {
     position: fixed;
     inset: 0;
-    background:
-      radial-gradient(ellipse at center, rgba(40,30,15,0.55), rgba(0,0,0,0.85)),
-      #1a1a1a;
+    /* Light dim so the game map shows clearly behind the card. */
+    background: rgba(0, 0, 0, 0.42);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -138,45 +166,75 @@
   }
   #menu .menu-card {
     text-align: center;
-    padding: 32px 40px;
-    background: rgba(0,0,0,0.55);
-    border: 2px solid #ffd166;
-    box-shadow: 0 0 0 4px #1a1a1a, 0 0 24px rgba(255,209,102,0.25);
+    padding: 28px 36px 24px 36px;
+    background: rgba(15, 18, 24, 0.96);
+    /* Double border + flat ring — no soft shadow, keeps the pixel edge. */
+    border: 4px solid #ffd166;
+    outline: 4px solid #1a1a1a;
+    min-width: 320px;
+  }
+  /* Subtle blur + contrast bump only kicks in when the global pixelate
+     toggle is on, so flipping it off leaves the menu perfectly crisp. */
+  body.pixelate-all #menu .menu-card {
+    filter: blur(0.15px) contrast(1.15);
   }
   #menu .menu-title {
-    font-size: 38px;
+    font-size: 30px;
+    font-weight: bold;
     color: #ffd166;
     margin: 0 0 4px 0;
-    letter-spacing: 1px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  #menu .title-chick {
+    display: inline-block;
+    margin: 0 10px;
+    font-size: 26px;
+    vertical-align: middle;
+  }
+  #menu .menu-version {
+    margin-top: 18px;
+    font-size: 13px;
+    color: #ffd166;
+    letter-spacing: 2px;
+  }
+  #menu .menu-version .by {
+    color: #d9c89a;
   }
   #menu .menu-sub {
-    font-size: 14px;
-    color: #d9c89a;
-    margin: 0 0 24px 0;
-    opacity: 0.85;
+    font-size: 15px;
+    color: #d7d7d7;
+    margin: 0 0 22px 0;
+    letter-spacing: 1px;
   }
   #menu .menu-btn {
     display: block;
     width: 240px;
-    margin: 10px auto;
-    padding: 12px 18px;
-    background: #2a2a2a;
+    margin: 8px auto;
+    padding: 11px 16px;
+    background: rgba(255, 255, 255, 0.08);
     color: #fff;
-    border: 1px solid #ffd166;
+    border: 3px solid rgba(255, 255, 255, 0.22);
     border-radius: 0;
     font-family: inherit;
     font-size: 16px;
     cursor: pointer;
-    letter-spacing: 0.5px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
   }
-  #menu .menu-btn:hover { background: #3a2f15; }
-  #menu .menu-btn--primary { background: #6b5230; }
-  #menu .menu-btn--primary:hover { background: #8a6a3f; }
+  #menu .menu-btn:hover {
+    background: rgba(255, 209, 102, 0.24);
+    border-color: #ffd166;
+  }
+  #menu .menu-btn--primary {
+    border-color: #ffd166;
+  }
   #menu .menu-hint {
     margin-top: 18px;
-    font-size: 11px;
-    color: #aaa;
-    line-height: 1.6;
+    font-size: 13px;
+    color: #9aa0a8;
+    line-height: 1.7;
+    letter-spacing: 1px;
   }
   #menu .menu-screen { display: none; }
   #menu .menu-screen.is-active { display: block; }
@@ -185,7 +243,7 @@
     border: none;
     color: #ffd166;
     font-family: inherit;
-    font-size: 13px;
+    font-size: 15px;
     cursor: pointer;
     padding: 0;
     margin: 0 0 12px 0;
@@ -199,28 +257,29 @@
     padding: 10px 14px;
     background: #1a1a1a;
     color: #ffd166;
-    border: 1px solid #ffd166;
-    font-family: monospace;
-    font-size: 22px;
+    border: 3px solid #ffd166;
+    font-family: inherit;
+    font-size: 26px;
     letter-spacing: 4px;
     text-align: center;
     text-transform: uppercase;
     border-radius: 0;
+    outline: none;
   }
   #menu .lobby-code {
-    font-family: monospace;
-    font-size: 32px;
+    font-family: inherit;
+    font-size: 34px;
     letter-spacing: 8px;
     color: #ffd166;
     background: #1a1a1a;
-    border: 1px dashed #ffd166;
+    border: 3px dashed #ffd166;
     padding: 12px 18px;
     margin: 6px 0 10px 0;
     user-select: text;
   }
   #menu .status {
     margin-top: 10px;
-    font-size: 12px;
+    font-size: 14px;
     color: #d9c89a;
     min-height: 1.2em;
   }
@@ -231,24 +290,45 @@
   body.in-menu #debug { display: none; }
 </style>
 </head>
-<body class="in-menu">
+<body class="in-menu pixelate-all">
 <canvas id="game"></canvas>
+
+<!-- SVG pixelation filter — applied to <body> via .pixelate-all so every
+     rasterised element (canvas included) is quantised to a 2x2 grid.
+     Toggleable from the debug panel since full-screen SVG filters can be
+     expensive (the browser re-rasterises the whole tree per frame). -->
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <filter id="pixelate" x="0" y="0">
+      <feFlood x="0" y="0" width="1" height="1"/>
+      <feComposite width="2" height="2"/>
+      <feTile result="a"/>
+      <feComposite in="SourceGraphic" in2="a" operator="in"/>
+      <feMorphology operator="dilate" radius="1"/>
+      <!-- Trailing blur softens the 2x2 block edges so the result reads
+           as "low-res scaled" rather than a hard pixel grid. -->
+      <feGaussianBlur stdDeviation="0.4"/>
+    </filter>
+  </defs>
+</svg>
 
 <div id="menu">
   <div class="menu-card">
     <!-- Title -->
     <section class="menu-screen is-active" data-screen="title">
-      <h1 class="menu-title">Chicken Keeper</h1>
+      <h1 class="menu-title">
+        <span class="title-chick" aria-hidden="true">🐔</span>Chicken Keeper<span class="title-chick" aria-hidden="true">🐔</span>
+      </h1>
       <p class="menu-sub">Defend your flock from the wolves.</p>
       <button class="menu-btn menu-btn--primary" id="btnSingle">Single Player</button>
       <button class="menu-btn" id="btnMulti">Multiplayer</button>
-      <p class="menu-hint">WASD + Mouse</p>
+      <p class="menu-version">v0.5.0 <span class="by">·  made by ricardobertolin</span></p>
     </section>
 
     <!-- Online lobby — pick a role -->
     <section class="menu-screen" data-screen="online">
       <button class="menu-back" data-back="title">&lsaquo; Back</button>
-      <h1 class="menu-title" style="font-size:28px">Play Online</h1>
+      <h1 class="menu-title" style="font-size:26px">Play Online</h1>
       <p class="menu-sub">Pick a role to start.</p>
       <button class="menu-btn menu-btn--primary" id="btnHost">Host a Lobby</button>
       <button class="menu-btn" id="btnJoin">Join a Lobby</button>
@@ -258,7 +338,7 @@
     <!-- Host: waiting for guest -->
     <section class="menu-screen" data-screen="host-wait">
       <button class="menu-back" id="btnHostCancel">&lsaquo; Cancel</button>
-      <h1 class="menu-title" style="font-size:28px">Hosting</h1>
+      <h1 class="menu-title" style="font-size:26px">Hosting</h1>
       <p class="menu-sub">Lobby code — share with the other player.</p>
       <p class="lobby-code" id="lobbyCode"></p>
       <p class="status" id="hostStatus">Connecting to broker…</p>
@@ -267,7 +347,7 @@
     <!-- Guest: enter a code -->
     <section class="menu-screen" data-screen="join">
       <button class="menu-back" data-back="online" id="btnJoinBack">&lsaquo; Back</button>
-      <h1 class="menu-title" style="font-size:28px">Join a Lobby</h1>
+      <h1 class="menu-title" style="font-size:26px">Join a Lobby</h1>
       <p class="menu-sub">Enter the host's lobby code.</p>
       <input type="text" id="joinCode" class="menu-input"
              placeholder="ABC123" maxlength="6"
@@ -322,6 +402,23 @@
 
 <script>
 (() => {
+  // ---------- Debug switches ----------
+  // Master pixelate toggle. true → menu + HUD + canvas pass through the
+  // SVG #pixelate filter for the low-fi look; false → everything renders
+  // crisp. Lives here so it can be flipped without touching the runtime UI.
+  const PIXELATE = false;
+  // Apply at load — body starts with the class for first paint, this clears
+  // it if PIXELATE is false.
+  if (!PIXELATE) document.body.classList.remove('pixelate-all');
+
+  // Master toggle for the developer debug panel (top-right). false hides it
+  // and skips its setup so none of the helper buttons exist.
+  const DEBUG = false;
+  if (!DEBUG) {
+    const dbg = document.getElementById('debug');
+    if (dbg) dbg.style.display = 'none';
+  }
+
   // ---------- Canvas setup ----------
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -356,8 +453,33 @@
     return audioCtx;
   }
 
+  // ---- Multiplayer audio relay ----
+  // Sounds normally fire on the host (where the sim runs) so the guest stays
+  // silent. Each play*() function calls queueNetSound() at the top; the host
+  // ships the queue inside every snapshot, the guest replays each entry
+  // locally via playSoundByName() — so both clients hear shots, reloads,
+  // chicken squawks, dog barks, etc.
+  const pendingNetSounds = [];
+  function queueNetSound(name) {
+    if (multiplayer && isHost) pendingNetSounds.push(name);
+  }
+  function playSoundByName(name) {
+    switch (name) {
+      case 'shotgun':      playShotgun(); break;
+      case 'reload':       playReload(); break;
+      case 'reloadJam':    playReloadJam(); break;
+      case 'chickenDeath': playChickenDeath(); break;
+      case 'dogBark':      playDogBark(); break;
+      case 'swordSwing':   playSwordSwing(); break;
+      case 'money':        playMoney(); break;
+      case 'harvest':      playHarvest(); break;
+      case 'build':        playBuild(); break;
+    }
+  }
+
   // A hammer striking twice — the building/placement sound.
   function playBuild() {
+    queueNetSound('build');
     const ctx = getAudio();
     if (!ctx) return;
     const now = ctx.currentTime;
@@ -396,6 +518,7 @@
   }
 
   function playShotgun() {
+    queueNetSound('shotgun');
     const ctx = getAudio();
     if (!ctx) return;
     const now = ctx.currentTime;
@@ -456,6 +579,7 @@
   }
 
   function playReload() {
+    queueNetSound('reload');
     const ctx = getAudio();
     if (!ctx) return;
     const now = ctx.currentTime;
@@ -487,6 +611,7 @@
   }
 
   function playReloadJam() {
+    queueNetSound('reloadJam');
     const ctx = getAudio();
     if (!ctx) return;
     const now = ctx.currentTime;
@@ -516,6 +641,7 @@
   }
 
   function playChickenDeath() {
+    queueNetSound('chickenDeath');
     const ctx = getAudio();
     if (!ctx) return;
     const now = ctx.currentTime;
@@ -577,6 +703,7 @@
 
   // A short dog "woof" — played when a guard dog bites a wolf.
   function playDogBark() {
+    queueNetSound('dogBark');
     const ctx = getAudio();
     if (!ctx) return;
     const now = ctx.currentTime;
@@ -599,6 +726,7 @@
 
   // A quick rising whoosh — the player's sword swing (Wolf's Blade).
   function playSwordSwing() {
+    queueNetSound('swordSwing');
     const ctx = getAudio();
     if (!ctx) return;
     const now = ctx.currentTime;
@@ -626,6 +754,7 @@
 
   // A bright two-note coin "ka-ching" — played on a golden-gun jackpot.
   function playMoney() {
+    queueNetSound('money');
     const ctx = getAudio();
     if (!ctx) return;
     const now = ctx.currentTime;
@@ -647,6 +776,7 @@
   // A crop being gathered — a soft grain rustle under a warm rising chime.
   // Played when a farm plot ripens and pays out.
   function playHarvest() {
+    queueNetSound('harvest');
     const ctx = getAudio();
     if (!ctx) return;
     const now = ctx.currentTime;
@@ -716,6 +846,8 @@
   const keys = {};
   const mouse = { x: 0, y: 0, down: false };
   window.addEventListener('keydown', e => {
+    // Title/lobby menu is up — let inputs (join code) work, but no game keys.
+    if (inMenu) return;
     if (upgradeMode) {
       if (e.key === '1') { selectUpgrade(0); return; }
       if (e.key === '2') { selectUpgrade(1); return; }
@@ -725,6 +857,13 @@
     if (e.key === 'Escape') {
       if (paused) { togglePause(); return; }
       if (!gameOver) togglePause();
+      return;
+    }
+    // Q while paused or on the game-over screen drops the run + returns
+    // to the title menu. Guarded so a stray Q mid-wave can't quit you.
+    if (e.key.toLowerCase() === 'q' && (paused || gameOver)) {
+      e.preventDefault();
+      quitToMenu();
       return;
     }
     if (paused) return;
@@ -757,7 +896,16 @@
     mouse.y = (e.clientY - r.top) * H / r.height;
   });
   canvas.addEventListener('mousedown', e => {
-    if (paused) return;
+    if (paused) {
+      // While paused, the only interactive element is the tab-switch arrow
+      // at the bottom of the pause panel.
+      if (pauseTabRect &&
+          mouse.x >= pauseTabRect.x && mouse.x <= pauseTabRect.x + pauseTabRect.w &&
+          mouse.y >= pauseTabRect.y && mouse.y <= pauseTabRect.y + pauseTabRect.h) {
+        pauseTab = pauseTab === 'status' ? 'upgrades' : 'status';
+      }
+      return;
+    }
     mouse.down = true;
     if (upgradeMode) {
       selectUpgradeAt(mouse.x, mouse.y);
@@ -790,8 +938,12 @@
   }, { passive: false });
 
   // ---------- Game state ----------
-  // Title menu gates the simulation — update() bails out until a mode is picked.
-  let gameStarted = false;
+  // The simulation runs from page load so the title menu can sit on top of a
+  // live, ambient farm scene — picking a mode just dismisses the overlay.
+  let gameStarted = true;
+  // While the menu is up, player input and wave spawning are suppressed
+  // (chickens and coops keep ticking for the ambient backdrop).
+  let inMenu = true;
   let multiplayer = false;
 
   const player = {
@@ -810,6 +962,7 @@
     meleeFull: false,   // true when the swing is a full 360° (max-level AoE)
     spinT: 0,           // Gun Twirl animation timer (counts down)
     spinDmg: false,     // true while a max-level twirl's double-damage shot is pending
+    ghost: false,       // on the guest's screen, true once they've died — they wander on as an immortal spectre
   };
   // Network-driven second player — a real actor: wolves target it, it takes
   // hits and dies. Hats / hurtT are authoritative on the host and synced down
@@ -824,6 +977,17 @@
     active: false,      // flipped on when multiplayer is chosen
     hats: 3,            // health — overwritten by START_HATS on game start
     hurtT: 0,           // hit flash timer (visual)
+    // Weapon-animation timers synced from the host so the guest can render
+    // its keeper's gun/sword/melee correctly. Unused on the host side.
+    reloadT: 0,
+    jamT: 0,
+    spinT: 0,
+    meleeT: 0,
+    meleeDir: 0,
+    meleeFull: false,
+    // On the host, true once the guest's hat stack hit zero — they
+    // become an immortal ghost that wolves ignore. Synced to the guest.
+    ghost: false,
   };
   // Run mechanic — walking with no shots and no reload builds a little momentum.
   const RUN_WARMUP = 1.0;     // seconds of walking before the sprint kicks in
@@ -831,14 +995,16 @@
   // Stampede upgrade — a running player gets faster, and at max tramples enemies.
   const TRAMPLE_DMG = 3;      // damage per trample hit
   const TRAMPLE_RATE = 5;     // average trample hits per second of contact
-  // Soft / Hard Bullet upgrades — ricocheting pellets.
-  const SOFT_SPARE = 0.5;     // chance a maxed Soft Bullet spares a hit chicken
-  const HARD_DMG_MUL = 1.3;   // pellet damage multiplier at max Hard Bullet
+  // Soft / Hard Bullet upgrades — chicken-friendly vs higher damage.
+  // (No constants needed — both progressions come from SKILL_TABLES.)
   // Rusty Springs upgrade — the golden-gun gamble.
   const GOLD_PER_JAM = 1;     // base gold a jam pays at max Rusty Springs
   const GOLD_JAM_GRACE = 3;   // first N consecutive jams of a streak pay nothing
   const GOLD_STREAK_CAP = 6;  // payout doubling caps at 2^6 ($64)
   const RUST_COLORS = ['#2b2b2b', '#6b5230', '#7d4a22', '#8a3f18', '#94350f']; // barrel tint by rust level 0-4
+  // The guest keeper wears a yellow straw hat in both clients' views so the
+  // two players can be told apart at a glance (host = brown, guest = straw).
+  const GUEST_HAT_COLOR = '#caa24a';
   // Wolf's Blade upgrade — once a sword wolf is slain, the gun can be traded
   // for a sword: clicks become melee swings dealing huge damage.
   const SWORD_DMG = 40;        // damage a swing deals to each wolf it catches
@@ -960,6 +1126,13 @@
   const BUILD_TYPES = ['coop', 'farm', 'fence', 'stonefence', 'remove']; // cycled with the scroll wheel in build mode
   let buildType = 0;
   let paused = false;
+  // Active pause-window tab ('status' or 'upgrades') and the screen-space
+  // rect of the "next tab" arrow — filled in by drawPauseWindow each frame
+  // and hit-tested by the canvas mousedown handler.
+  let pauseTab = 'status';
+  let pauseTabRect = null;
+  // Guest-side mirror of host's pause state — drives the "HOST PAUSED" overlay.
+  let hostPaused = false;
   let upgradeDelayT = 0;
   let upgradeMode = false;
   let upgradeOptions = [];
@@ -995,11 +1168,11 @@
     fireRate: [0.75, 0.65, 0.55, 0.45, 0.35, 0.15],
     woodFence: [0, 1, 2, 3, 4, 5],     // HP of placed wooden fences (index 0 = locked)
     stoneWall: [0, 2, 4, 6, 8, 12],    // HP of placed stone walls (index 0 = locked)
-    reloadMove: [0.80, 0.65, 0.50, 0.35, 0.20, 0.00], // move-speed penalty while reloading (lvl 0 = very slow, never rooted)
+    reloadMove: [0.80, 0.70, 0.60, 0.45, 0.35, 0.20], // move-speed penalty while reloading (max still leaves a 20% slow — never trivial)
     counter:    [0.05, 0.10, 0.20, 0.30, 0.40, 0.50], // melee counter-attack chance when hit
     sprint:     [0.25, 0.28, 0.31, 0.34, 0.37, 0.40], // run-speed bonus at a full sprint (index 0 = base)
-    softBullet: [0, 1, 2, 3, 4, 5],      // pellet ricochets — Soft Bullet (wolves only)
-    hardBullet: [0, 2, 4, 6, 8, 10],     // pellet ricochets — Hard Bullet (incl. chickens)
+    softBullet: [0, 0.20, 0.40, 0.60, 0.80, 1.00], // chance a pellet PASSES THROUGH a chicken instead of killing it
+    hardBullet: [1.0, 1.20, 1.40, 1.60, 1.80, 2.00], // pellet damage multiplier vs wolves
     rust:       [0, 0.10, 0.20, 0.30, 0.40, 0.50], // extra jam chance added by Rusty Springs
     snatch:     [0, 0.04, 0.08, 0.12, 0.16, 0.20], // chance a wolf carries its kill off the map
     spinReload: [0, 0.04, 0.08, 0.12, 0.16, 0.20], // chance a reload becomes an instant twirl
@@ -1117,6 +1290,7 @@
 
   function togglePause() {
     paused = !paused;
+    if (paused) pauseTab = 'status'; // always re-open on the status tab
   }
 
   function shuffle(items) {
@@ -1318,9 +1492,10 @@
         title: 'Soft Bullets',
         available() { return wave >= 30 && upgradeLevels.hardBullet === 0 && upgradeLevels.softBullet < 5; },
         desc() {
+          const pct = Math.round(tableNext('softBullet') * 100);
           return upgradeLevels.softBullet >= 4
-            ? 'MAX: ' + tableNext('softBullet') + 'x ricochet, may spare chickens'
-            : 'Pellets ricochet ' + tableNext('softBullet') + 'x off wolves';
+            ? 'MAX: ' + pct + '% — pellets always spare chickens (bluish)'
+            : 'Chance to spare a hit chicken → ' + pct + '%';
         },
         apply() { upgradeLevels.softBullet++; },
       },
@@ -1329,9 +1504,11 @@
         title: 'Hard Bullets',
         available() { return wave >= 30 && upgradeLevels.softBullet === 0 && upgradeLevels.hardBullet < 5; },
         desc() {
+          const mul = tableNext('hardBullet');
+          const pct = Math.round((mul - 1) * 100);
           return upgradeLevels.hardBullet >= 4
-            ? 'MAX: ' + tableNext('hardBullet') + 'x ricochet + more damage'
-            : 'Pellets ricochet ' + tableNext('hardBullet') + 'x (incl. chickens)';
+            ? 'MAX: pellets do +' + pct + '% damage (reddish)'
+            : 'Pellet damage → +' + pct + '%';
         },
         apply() { upgradeLevels.hardBullet++; },
       },
@@ -2033,14 +2210,10 @@
     const tighter = upgradeLevels.spreadDown > 0; // Tighter Pattern: harder-hitting pellets
     let pelletDmg = isSlug ? (5 + upgradeLevels.spreadDown2 * 2) : loose ? 0.7 : tighter ? 1.3 : 1;
     const pelletR   = isSlug ? 3.5 : loose ? 1.3 : 2;
-    // Soft / Hard Bullet: ricocheting pellets. Hard also bounces off chickens
-    // and, when maxed, hits a little harder. Soft maxed can spare chickens.
-    const soft = upgradeLevels.softBullet > 0;
-    const hard = upgradeLevels.hardBullet > 0;
-    const bounces = soft ? tableAt('softBullet') : hard ? tableAt('hardBullet') : 0;
-    const bounceChickens = hard;
-    const spareChicken = upgradeLevels.softBullet >= 5;
-    if (upgradeLevels.hardBullet >= 5) pelletDmg *= HARD_DMG_MUL;
+    // Soft Bullet: per-pellet chance to pass through a chicken without harm.
+    // Hard Bullet: scaling damage multiplier vs wolves. Mutually exclusive.
+    const spareChance = upgradeLevels.softBullet > 0 ? tableAt('softBullet') : 0;
+    if (upgradeLevels.hardBullet > 0) pelletDmg *= tableAt('hardBullet');
     // Gun Twirl MAX: the shot fired right after a twirl reload hits twice as hard.
     if (player.spinDmg) { pelletDmg *= 2; player.spinDmg = false; }
     pelletDmg *= dmgMul; // Double-Barrel passes 2 — its twin blast hits harder
@@ -2048,6 +2221,9 @@
     let pelletColor = isSlug ? '#ffe680' : '#fff3a0';
     if (isSlug && upgradeLevels.spreadDown2 >= 5) pelletColor = '#ffaa3a';
     else if (loose && upgradeLevels.spreadUp2 >= 5) pelletColor = '#ffaa3a';
+    // Soft / Hard max tint the pellet so the player can see the flavour at a glance.
+    if (upgradeLevels.softBullet >= 5)      pelletColor = '#7ec7ff'; // pale blue
+    else if (upgradeLevels.hardBullet >= 5) pelletColor = '#ff6a6a'; // soft red
     const aim = aimAngle();
     const speed = 18;
     for (let i = 0; i < pelletCount; i++) {
@@ -2063,10 +2239,8 @@
         life: shotgunLife,
         dmg: pelletDmg,
         pierce: isSlug ? (10 + upgradeLevels.spreadDown2 * 3) : 1,
-        hit: (isSlug || bounces > 0) ? new Set() : null,
-        bounces: bounces,
-        bounceChickens: bounceChickens,
-        spareChicken: spareChicken,
+        hit: isSlug ? new Set() : null,
+        spareChance: spareChance,
         r: pelletR,
         color: pelletColor,
         trail: !isSlug,
@@ -2305,7 +2479,8 @@
   // Whichever keeper is closer to (x,y) — used by wolves so they can chase
   // either player. In single-player there is only the host's keeper.
   function nearestKeeper(x, y) {
-    if (!player2.active) return player;
+    // Ghosts don't draw aggro — wolves only see solid keepers.
+    if (!player2.active || player2.ghost) return player;
     const d1 = dist2(x, y, player.x, player.y);
     const d2 = dist2(x, y, player2.x, player2.y);
     return d2 < d1 ? player2 : player;
@@ -2697,7 +2872,7 @@
                 if (!tryKarmaResurrect()) {
                   gameOver = true;
                   gameOverCause = 'host';
-                  gameOverMsg = 'A wolf knocked off your last hat! Press F5 to restart.';
+                  gameOverMsg = 'A wolf knocked off your last hat! Press Q for menu or F5 to restart.';
                 }
               } else {
                 toast('A wolf knocked off a hat! ' + playerHats + ' left', 1.2);
@@ -2705,14 +2880,16 @@
             }
             // Melee counter — a chance to strike the attacker back.
             if (!gameOver && Math.random() < tableAt('counter')) meleeCounter(w);
-          } else if (target === player2) {
+          } else if (target === player2 && !player2.ghost) {
             shake = 0.18;
             player2.hurtT = 0.22;
             player2.hats--;
             if (player2.hats <= 0) {
-              gameOver = true;
-              gameOverCause = 'guest';
-              gameOverMsg = 'Your partner fell to a wolf! Press F5 to restart.';
+              // Guest doesn't game-over — they become an immortal ghost
+              // that wolves ignore. Only the host's death ends the run.
+              player2.hats = 0;
+              player2.ghost = true;
+              toast('Partner fell — wandering as a ghost!', 2.6);
             } else {
               toast('Partner got hit! ' + player2.hats + ' hats left', 1.2);
             }
@@ -2920,22 +3097,38 @@
     playerHats = 7;
     hatColors.length = 0;
     for (let i = 0; i < 7; i++) hatColors.push(good ? '#f4f4f4' : '#161616');
-    // Explosion centred on the player — the same white ring as a maxed melee.
-    spawnBlast(player.x, player.y);
-    shake = Math.max(shake, 0.6);
+    shake = Math.max(shake, 0.9);
     player.hurtT = 0;
-    const r2 = 3.2 * 3.2;
-    for (const w of wolves) {
-      if (!w.alive) continue;
-      if (dist2(w.x, w.y, player.x, player.y) < r2) {
-        const wdx = w.x - player.x, wdy = w.y - player.y;
-        const wm = Math.hypot(wdx, wdy) || 1;
-        hurtWolf(w, 999, (wdx / wm) * 0.6, (wdy / wm) * 0.6);
+    // Map-wide explosion: a ring of blasts across the world for the visual.
+    // Good karma: wipes every wolf/fox/bomb wolf but spares chickens.
+    // Bad karma: kills every living thing, chickens included.
+    const STEP = 4; // tile spacing between blast rings — covers the map
+    for (let bx = -HALF_MAP; bx <= HALF_MAP; bx += STEP) {
+      for (let by = -HALF_MAP; by <= HALF_MAP; by += STEP) {
+        spawnBlast(bx, by);
       }
     }
+    // Vapourise every wolf on the map regardless of distance.
+    for (const w of wolves) {
+      if (!w.alive) continue;
+      const wdx = w.x - player.x, wdy = w.y - player.y;
+      const wm = Math.hypot(wdx, wdy) || 1;
+      hurtWolf(w, 9999, (wdx / wm) * 0.6, (wdy / wm) * 0.6);
+    }
+    // Bad karma also slaughters the flock — the rescue is paid in chickens.
+    if (!good) {
+      for (const c of chickens) {
+        if (!c.alive) continue;
+        c.alive = false;
+        corpses.push({ x: c.x, y: c.y, kind: 'chicken', t: 4 });
+        explodeChickenMaybe(c);
+      }
+      playChickenDeath();
+    }
     karma = 0; // the karma is consumed by the rescue
-    toast(good ? 'Good karma saves you — resurrected with 7 hats!'
-               : 'Bad karma saves you — resurrected with 7 hats!', 2.8);
+    toast(good
+      ? 'Good karma saves you — every wolf vapourised, 7 hats!'
+      : 'Bad karma saves you — the flock pays the price, 7 hats!', 3.2);
     return true;
   }
 
@@ -2976,17 +3169,6 @@
   // fresh random direction and flies on for a full projectile lifetime (set by
   // the Longer Barrel upgrade). If it hits something it ricochets again; if it
   // reaches nothing before its life runs out, it simply disappears.
-  function ricochet(p) {
-    const a = Math.random() * Math.PI * 2;
-    const sp = Math.hypot(p.vx, p.vy) || 18;
-    p.vx = Math.cos(a) * sp;
-    p.vy = Math.sin(a) * sp;
-    p.pierce = 1;          // refreshed so it can strike the next thing
-    p.bounces--;
-    p.life = shotgunLife;  // flight time = Longer Barrel projectile life
-    return true;
-  }
-
   function updatePellet(p, dt) {
     p.x += p.vx * dt;
     p.y += p.vy * dt;
@@ -3021,21 +3203,17 @@
           w.y += p.vy * 0.02;
         }
         if (p.hit) p.hit.add(w);
-        if (--p.pierce <= 0) {
-          // Soft / Hard Bullet: ricochet off the wolf instead of expiring.
-          if (p.bounces > 0 && ricochet(p)) return true;
-          return false;
-        }
+        if (--p.pierce <= 0) return false;
       }
     }
-    // Hit chickens (friendly fire - sad)
+    // Hit chickens (friendly fire — sad)
     for (const c of chickens) {
       if (!c.alive) continue;
       if (p.hit && p.hit.has(c)) continue;
       if (dist2(p.x, p.y, c.x, c.y) < 0.25) {
-        // Maxed Soft Bullets: a chance the chicken is grazed, not killed —
-        // the pellet flies on, leaving the chicken alive.
-        if (p.spareChicken && Math.random() < SOFT_SPARE) {
+        // Soft Bullets: chance the pellet passes harmlessly through the
+        // chicken. At max (1.0) it always spares them.
+        if (p.spareChance && Math.random() < p.spareChance) {
           if (p.hit) p.hit.add(c);
           continue;
         }
@@ -3046,8 +3224,6 @@
         explodeChickenMaybe(c);
         toast('You killed a chicken! :(  -$' + Math.pow(2, Math.floor(wave / 10)) + ' at wave end', 1);
         if (p.hit) p.hit.add(c);
-        // Hard Bullets ricochet off chickens too; Soft Bullets do not.
-        if (p.bounceChickens && p.bounces > 0 && ricochet(p)) return true;
         if (--p.pierce <= 0) return false;
       }
     }
@@ -3062,12 +3238,17 @@
     update(dt);
     // Net sync runs even when update() bails out (paused / upgrade / gameOver)
     // so the guest keeps receiving fresh state and game-over propagates.
-    if (gameStarted && multiplayer && player2.active) {
+    if (gameStarted && multiplayer && conn && conn.open) {
       netSendT -= dt;
       if (netSendT <= 0) {
         netSendT = 0.05;
         if (isHost) netSendSnapshot();
         else        netSendPosition();
+      }
+      // Silence-timeout fallback: if no message has arrived for a while the
+      // partner is presumed gone (tab close often skips conn.close).
+      if (!netDisconnected && performance.now() - netLastRecv > NET_TIMEOUT_MS) {
+        handlePeerGone('timeout');
       }
     }
     render();
@@ -3092,11 +3273,15 @@
 
     // Player movement (screen-axis aligned WASD)
     // Convert screen-up "W" to a world vector. In iso, screen-up = (-1,-1) in world.
+    // While the title/lobby menu is up, the keeper just stands still so the
+    // world ticks as an ambient backdrop without responding to game keys.
     let mx = 0, my = 0;
+    if (!inMenu) {
     if (keys['w'] || keys['arrowup'])    { mx -= 1; my -= 1; }
     if (keys['s'] || keys['arrowdown'])  { mx += 1; my += 1; }
     if (keys['a'] || keys['arrowleft'])  { mx -= 1; my += 1; }
     if (keys['d'] || keys['arrowright']) { mx += 1; my -= 1; }
+    }
     // Reloading slows you to half speed; a jam roots you in place — unless
     // Better Springs is maxed, which softens a jam to a 50% slow instead.
     let moveMul = 1;
@@ -3239,8 +3424,9 @@
       }
 
       // The timer is paused while a wave is active, before the first coop is placed,
-      // or when debug wave auto-start is paused.
-      if (!waveActive && !waveAutoStartPaused && (wave > 0 || coops.length > 0)) {
+      // or when debug wave auto-start is paused. Also suspended during the
+      // menu demo so the ambient backdrop never spawns wolves.
+      if (!inMenu && !waveActive && !waveAutoStartPaused && (wave > 0 || coops.length > 0)) {
         waveTimer -= dt;
         if (waveTimer <= 0) startWave();
       }
@@ -3301,6 +3487,9 @@
     if (upgradeMode) {
       if (multiplayer && !isHost) drawUpgradeWaitOverlay();
       else drawUpgradeWindow();
+    } else if (multiplayer && !isHost && hostPaused) {
+      // Surface the host's pause state so the guest knows why everything stopped.
+      drawHostPausedOverlay();
     }
 
     if (paused) {
@@ -3312,16 +3501,16 @@
       ctx.fillRect(0, 0, W, H);
       ctx.fillStyle = '#fff';
       ctx.textAlign = 'center';
-      ctx.font = 'bold 48px system-ui';
+      ctx.font = 'bold 48px "Lucida Console", Consolas, monospace';
       ctx.fillText('GAME OVER', W/2, H/2 - 20);
-      ctx.font = '20px system-ui';
+      ctx.font = '20px "Lucida Console", Consolas, monospace';
       // In multiplayer, pick the message from THIS client's POV.
       let msg = gameOverMsg;
       if (multiplayer && gameOverCause) {
         const youDied = (gameOverCause === 'host' && isHost) || (gameOverCause === 'guest' && !isHost);
         msg = youDied
-          ? 'A wolf knocked off your last hat! Press F5 to restart.'
-          : 'Your partner fell to a wolf! Press F5 to restart.';
+          ? 'A wolf knocked off your last hat! Press Q for menu or F5 to restart.'
+          : 'Your partner fell to a wolf! Press Q for menu or F5 to restart.';
       }
       ctx.fillText(msg, W/2, H/2 + 20);
     }
@@ -3644,11 +3833,40 @@
     ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
     ctx.fillStyle = '#ffd166';
     ctx.textAlign = 'center';
-    ctx.font = 'bold 22px system-ui';
+    ctx.font = 'bold 22px "Lucida Console", Consolas, monospace';
     ctx.fillText('Wave cleared', W / 2, y + 38);
     ctx.fillStyle = '#d7d7d7';
-    ctx.font = '14px system-ui';
+    ctx.font = '14px "Lucida Console", Consolas, monospace';
     ctx.fillText('Host is choosing an upgrade…', W / 2, y + 66);
+    ctx.restore();
+  }
+
+  // Shown on the guest while the host has paused — the world is frozen on
+  // the host's side, so this surfaces the reason instead of just appearing
+  // unresponsive.
+  function drawHostPausedOverlay() {
+    ctx.save();
+    if (PIXELATE && document.body.classList.contains('pixelate-all')) {
+      ctx.filter = 'url(#pixelate)';
+    }
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, W, H);
+    const w = Math.min(360, W - 24);
+    const h = 96;
+    const x = (W - w) / 2;
+    const y = (H - h) / 2;
+    ctx.fillStyle = 'rgba(15,18,24,0.96)';
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = '#ffd166';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+    ctx.fillStyle = '#ffd166';
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 22px "Lucida Console", Consolas, monospace';
+    ctx.fillText('HOST PAUSED', W / 2, y + 38);
+    ctx.fillStyle = '#d7d7d7';
+    ctx.font = '14px "Lucida Console", Consolas, monospace';
+    ctx.fillText('Waiting for the host to resume…', W / 2, y + 66);
     ctx.restore();
   }
 
@@ -3670,9 +3888,9 @@
 
     ctx.fillStyle = '#fff';
     ctx.textAlign = 'center';
-    ctx.font = 'bold 28px system-ui';
+    ctx.font = 'bold 28px "Lucida Console", Consolas, monospace';
     ctx.fillText('Wave cleared', W / 2, panelY + 40);
-    ctx.font = '16px system-ui';
+    ctx.font = '16px "Lucida Console", Consolas, monospace';
     ctx.fillText('Choose one upgrade to resume the next wave', W / 2, panelY + 68);
 
     // Picking one of a mutually-exclusive pair locks the other out for good.
@@ -3721,7 +3939,7 @@
       // Title
       ctx.fillStyle = '#fff';
       ctx.textAlign = 'left';
-      ctx.font = 'bold 16px system-ui';
+      ctx.font = 'bold 16px "Lucida Console", Consolas, monospace';
       ctx.fillText((i + 1) + '. ' + option.title, rect.x + 14, rect.y + 22);
 
       // One star per time this upgrade was already taken — capped at 10,
@@ -3732,28 +3950,28 @@
       }
       if (count > 10) {
         ctx.fillStyle = accent;
-        ctx.font = 'bold 10px system-ui';
+        ctx.font = 'bold 10px "Lucida Console", Consolas, monospace';
         ctx.textAlign = 'left';
         ctx.fillText('x' + count, rect.x + 17 + stars * 8 + 1, rect.y + 41);
       }
       // Flag the final possible level.
       if (isLast) {
         ctx.fillStyle = accent;
-        ctx.font = 'bold 9px system-ui';
+        ctx.font = 'bold 9px "Lucida Console", Consolas, monospace';
         ctx.textAlign = 'right';
         ctx.fillText('MAX', rect.x + rect.w - 11, rect.y + 40);
         ctx.textAlign = 'left';
       }
 
       // Description
-      ctx.font = '13px system-ui';
+      ctx.font = '13px "Lucida Console", Consolas, monospace';
       ctx.fillStyle = '#d7d7d7';
       wrapText(option.desc(), rect.x + 14, rect.y + 56, rect.w - 28, 15);
 
       // Warn that taking this will permanently lock out the paired upgrade.
       if (locksOut) {
         ctx.fillStyle = '#ff9d4d';
-        ctx.font = 'bold 9px system-ui';
+        ctx.font = 'bold 9px "Lucida Console", Consolas, monospace';
         ctx.textAlign = 'left';
         ctx.fillText('Locks out ' + locksOut, rect.x + 14, rect.y + 96);
       }
@@ -3761,7 +3979,7 @@
 
     ctx.fillStyle = '#ffd166';
     ctx.textAlign = 'center';
-    ctx.font = '13px system-ui';
+    ctx.font = '13px "Lucida Console", Consolas, monospace';
     ctx.fillText('Press 1-3 or click an option', W / 2, panelY + panelH - 16);
     ctx.restore();
   }
@@ -3783,6 +4001,12 @@
   // its current custom stat and level.
   function drawPauseWindow() {
     ctx.save();
+    // Pass the panel through the same SVG pixel filter the menu uses when
+    // PIXELATE is on. Without this, canvas-drawn text was crisp while the
+    // HTML menu around it was blocky — visually inconsistent.
+    if (document.body.classList.contains('pixelate-all')) {
+      ctx.filter = 'url(#pixelate)';
+    }
     ctx.fillStyle = 'rgba(0, 0, 0, 0.68)';
     ctx.fillRect(0, 0, W, H);
 
@@ -3826,8 +4050,8 @@
       { id: 'reloadMove',  title: 'Reload Movement',    max: MAX_LEVEL,       stat: () => 'reload slow ' + Math.round(tableAt('reloadMove') * 100) + '%' },
       { id: 'counter',     title: 'Melee Strike',       max: 5,              stat: () => Math.round(tableAt('counter') * 100) + '% melee' + (upgradeLevels.counter >= 5 ? ' + AoE' : '') },
       { id: 'sprint',      title: 'Stampede',           max: 5,              stat: () => '+' + Math.round(tableAt('sprint') * 100) + '% sprint' + (upgradeLevels.sprint >= 5 ? ' + trample' : '') },
-      { id: 'softBullet',  title: 'Soft Bullets',       max: 5,              stat: () => tableAt('softBullet') + 'x ricochet' + (upgradeLevels.softBullet >= 5 ? ', spares chickens' : '') },
-      { id: 'hardBullet',  title: 'Hard Bullets',       max: 5,              stat: () => tableAt('hardBullet') + 'x ricochet' + (upgradeLevels.hardBullet >= 5 ? ', +dmg' : '') },
+      { id: 'softBullet',  title: 'Soft Bullets',       max: 5,              stat: () => Math.round(tableAt('softBullet') * 100) + '% spare chance' + (upgradeLevels.softBullet >= 5 ? ' (blue)' : '') },
+      { id: 'hardBullet',  title: 'Hard Bullets',       max: 5,              stat: () => '+' + Math.round((tableAt('hardBullet') - 1) * 100) + '% dmg' + (upgradeLevels.hardBullet >= 5 ? ' (red)' : '') },
       { id: 'rust',        title: 'Rusty Springs',      max: 5,              stat: () => upgradeLevels.rust >= 5 ? 'golden gun — jams pay gold' : '+' + Math.round(tableAt('rust') * 100) + '% jam' },
       { id: 'sword',       title: "Wolf's Blade",       max: 1,              stat: () => 'gun replaced — ' + SWORD_DMG + '-dmg melee swing' },
       { id: 'spinReload',  title: 'Gun Twirl',          max: 5,              stat: () => Math.round(tableAt('spinReload') * 100) + '% twirl reload' + (upgradeLevels.spinReload >= 5 ? ', +dmg' : '') },
@@ -3840,123 +4064,119 @@
     ];
     const ownedUpgrades = allUpgrades.filter(u => (upgradeLevels[u.id] || 0) > 0);
 
-    // Layout metrics
+    // ----- Single-panel layout. Active tab is `pauseTab`. -----
     const padX = 22;
     const titleH = 46;
     const headingH = 20;
     const statusRowH = 16;
     const upgradeRowH = 17;
-    const hintH = 30;
+    const navH = 26; // height of the tab-switch button row
+    const hintH = 22;
 
-    // Panel A — live status
-    const statusRows = Math.ceil(statusItems.length / 2);
-    const panelAW = Math.min(320, W - 24);
-    const panelAH = titleH + headingH + statusRows * statusRowH + 16;
-
-    // Panel B — every upgrade's custom stat
-    const upgRowCount = Math.max(ownedUpgrades.length, 1);
-    const panelBW = Math.min(380, W - 24);
-    const panelBH = titleH + upgRowCount * upgradeRowH + hintH;
-
-    // Side by side when there's room, otherwise stack panel B under panel A.
-    const gap = 16;
-    const sideBySide = panelAW + gap + panelBW <= W - 16;
-    let panelAX, panelAY, panelBX, panelBY;
-    if (sideBySide) {
-      const groupW = panelAW + gap + panelBW;
-      const groupY = Math.max(8, (H - Math.max(panelAH, panelBH)) / 2);
-      panelAX = (W - groupW) / 2;
-      panelBX = panelAX + panelAW + gap;
-      panelAY = panelBY = groupY;
+    // Pick panel dimensions for whichever tab is showing.
+    let panelW, panelH;
+    if (pauseTab === 'status') {
+      const statusRows = Math.ceil(statusItems.length / 2);
+      panelW = Math.min(360, W - 24);
+      panelH = titleH + headingH + statusRows * statusRowH + 16 + navH + hintH;
     } else {
-      const groupY = Math.max(8, (H - (panelAH + gap + panelBH)) / 2);
-      panelAX = (W - panelAW) / 2;
-      panelBX = (W - panelBW) / 2;
-      panelAY = groupY;
-      panelBY = groupY + panelAH + gap;
+      const upgRowCount = Math.max(ownedUpgrades.length, 1);
+      panelW = Math.min(420, W - 24);
+      panelH = titleH + headingH + upgRowCount * upgradeRowH + 12 + navH + hintH;
     }
+    const panelX = Math.round((W - panelW) / 2);
+    const panelY = Math.max(8, Math.round((H - panelH) / 2));
 
-    function drawPanelBg(px, py, pw, ph) {
-      ctx.fillStyle = 'rgba(15, 18, 24, 0.96)';
-      ctx.fillRect(px, py, pw, ph);
-      ctx.strokeStyle = '#ffd166';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(px + 1, py + 1, pw - 2, ph - 2);
-    }
+    // Background panel.
+    ctx.fillStyle = 'rgba(15, 18, 24, 0.96)';
+    ctx.fillRect(panelX, panelY, panelW, panelH);
+    ctx.strokeStyle = '#ffd166';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(panelX + 1, panelY + 1, panelW - 2, panelH - 2);
 
-    // ----- Panel A: STATUS -----
-    drawPanelBg(panelAX, panelAY, panelAW, panelAH);
+    // PAUSED title.
     ctx.fillStyle = '#ffd166';
     ctx.textAlign = 'center';
-    ctx.font = 'bold 26px system-ui';
-    ctx.fillText('PAUSED', panelAX + panelAW / 2, panelAY + 32);
+    ctx.font = 'bold 26px "Lucida Console", Consolas, monospace';
+    ctx.fillText('PAUSED', panelX + panelW / 2, panelY + 32);
 
-    let ay = panelAY + titleH;
+    // Section heading for the current tab.
+    let cy = panelY + titleH;
     ctx.fillStyle = '#ffd166';
     ctx.textAlign = 'left';
-    ctx.font = 'bold 11px system-ui';
-    ctx.fillText('STATUS', panelAX + padX, ay + 12);
-    ay += headingH;
+    ctx.font = 'bold 13px "Lucida Console", Consolas, monospace';
+    ctx.fillText(pauseTab === 'status' ? 'STATUS' : 'UPGRADES', panelX + padX, cy + 12);
+    cy += headingH;
 
-    const colW = (panelAW - padX * 2) / 2;
-    for (let i = 0; i < statusItems.length; i++) {
-      const col = i % 2;
-      const row = Math.floor(i / 2);
-      const ix = panelAX + padX + col * colW;
-      const iy = ay + row * statusRowH + 11;
-      ctx.font = '13px system-ui';
-      ctx.fillStyle = '#9aa0a8';
-      ctx.textAlign = 'left';
-      ctx.fillText(statusItems[i][0], ix, iy);
-      ctx.fillStyle = '#fff';
-      ctx.textAlign = 'right';
-      ctx.fillText(String(statusItems[i][1]), ix + colW - 14, iy);
-    }
-
-    // ----- Panel B: UPGRADES (custom stats + levels) -----
-    drawPanelBg(panelBX, panelBY, panelBW, panelBH);
-    ctx.fillStyle = '#ffd166';
-    ctx.textAlign = 'center';
-    ctx.font = 'bold 26px system-ui';
-    ctx.fillText('UPGRADES', panelBX + panelBW / 2, panelBY + 32);
-
-    const by = panelBY + titleH;
-    if (ownedUpgrades.length === 0) {
-      ctx.fillStyle = '#9aa0a8';
-      ctx.textAlign = 'center';
-      ctx.font = '13px system-ui';
-      ctx.fillText('No upgrades taken yet', panelBX + panelBW / 2, by + 14);
-    } else {
-      for (let i = 0; i < ownedUpgrades.length; i++) {
-        const u = ownedUpgrades[i];
-        const lvl = upgradeLevels[u.id] || 0;
-        const iy = by + i * upgradeRowH + 12;
-        // Maxed = level has reached the functional cap (further picks do nothing
-        // mechanical). The whole row turns blue, matching the upgrade screen.
-        const maxed = lvl >= u.max;
-        // Upgrade name
+    // ----- Tab body -----
+    if (pauseTab === 'status') {
+      const colW = (panelW - padX * 2) / 2;
+      for (let i = 0; i < statusItems.length; i++) {
+        const col = i % 2;
+        const row = Math.floor(i / 2);
+        const ix = panelX + padX + col * colW;
+        const iy = cy + row * statusRowH + 11;
+        ctx.font = '13px "Lucida Console", Consolas, monospace';
+        ctx.fillStyle = '#9aa0a8';
         ctx.textAlign = 'left';
-        ctx.font = '13px system-ui';
-        ctx.fillStyle = maxed ? '#5fd0ff' : '#fff';
-        ctx.fillText(u.title, panelBX + padX, iy);
-        // Level as a Roman numeral, right after the name
-        const titleW = ctx.measureText(u.title).width;
-        ctx.font = 'bold 12px system-ui';
-        ctx.fillStyle = maxed ? '#5fd0ff' : '#ffd166';
-        ctx.fillText(toRoman(lvl), panelBX + padX + titleW + 6, iy);
-        // Custom stat, right-aligned
-        ctx.font = '12px system-ui';
-        ctx.fillStyle = maxed ? '#8fbdd0' : '#9aa0a8';
+        ctx.fillText(statusItems[i][0], ix, iy);
+        ctx.fillStyle = '#fff';
         ctx.textAlign = 'right';
-        ctx.fillText(u.stat(), panelBX + panelBW - padX, iy);
+        ctx.fillText(String(statusItems[i][1]), ix + colW - 14, iy);
+      }
+    } else {
+      if (ownedUpgrades.length === 0) {
+        ctx.fillStyle = '#9aa0a8';
+        ctx.textAlign = 'center';
+        ctx.font = '13px "Lucida Console", Consolas, monospace';
+        ctx.fillText('No upgrades taken yet', panelX + panelW / 2, cy + 14);
+      } else {
+        for (let i = 0; i < ownedUpgrades.length; i++) {
+          const u = ownedUpgrades[i];
+          const lvl = upgradeLevels[u.id] || 0;
+          const iy = cy + i * upgradeRowH + 12;
+          // Maxed = functional cap reached — whole row turns blue.
+          const maxed = lvl >= u.max;
+          ctx.textAlign = 'left';
+          ctx.font = '13px "Lucida Console", Consolas, monospace';
+          ctx.fillStyle = maxed ? '#5fd0ff' : '#fff';
+          ctx.fillText(u.title, panelX + padX, iy);
+          const titleW = ctx.measureText(u.title).width;
+          ctx.font = 'bold 12px "Lucida Console", Consolas, monospace';
+          ctx.fillStyle = maxed ? '#5fd0ff' : '#ffd166';
+          ctx.fillText(toRoman(lvl), panelX + padX + titleW + 6, iy);
+          ctx.font = '12px "Lucida Console", Consolas, monospace';
+          ctx.fillStyle = maxed ? '#8fbdd0' : '#9aa0a8';
+          ctx.textAlign = 'right';
+          ctx.fillText(u.stat(), panelX + panelW - padX, iy);
+        }
       }
     }
 
-    // Hint
+    // ----- Tab-switch button — sits above the hint, centered. -----
+    const navLabel = pauseTab === 'status' ? 'UPGRADES  >' : '<  STATUS';
+    ctx.font = 'bold 13px "Lucida Console", Consolas, monospace';
+    const navTextW = ctx.measureText(navLabel).width;
+    const navBtnW = Math.max(180, navTextW + 32);
+    const navBtnX = Math.round(panelX + (panelW - navBtnW) / 2);
+    const navBtnY = panelY + panelH - hintH - navH + 2;
+    pauseTabRect = { x: navBtnX, y: navBtnY, w: navBtnW, h: navH - 4 };
+    const navHover = mouse.x >= pauseTabRect.x && mouse.x <= pauseTabRect.x + pauseTabRect.w &&
+                     mouse.y >= pauseTabRect.y && mouse.y <= pauseTabRect.y + pauseTabRect.h;
+    ctx.fillStyle = navHover ? 'rgba(255, 209, 102, 0.24)' : 'rgba(255, 255, 255, 0.06)';
+    ctx.fillRect(pauseTabRect.x, pauseTabRect.y, pauseTabRect.w, pauseTabRect.h);
+    ctx.strokeStyle = '#ffd166';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(pauseTabRect.x + 0.5, pauseTabRect.y + 0.5, pauseTabRect.w - 1, pauseTabRect.h - 1);
+    ctx.fillStyle = '#ffd166';
+    ctx.textAlign = 'center';
+    ctx.fillText(navLabel, pauseTabRect.x + pauseTabRect.w / 2, pauseTabRect.y + 16);
+
+    // Hint.
     ctx.fillStyle = '#9aa0a8';
     ctx.textAlign = 'center';
-    ctx.font = '12px system-ui';
-    ctx.fillText('Press Esc to resume', panelBX + panelBW / 2, panelBY + panelBH - 12);
+    ctx.font = '12px "Lucida Console", Consolas, monospace';
+    ctx.fillText('Esc to resume  ·  Q to quit to menu', panelX + panelW / 2, panelY + panelH - 8);
 
     ctx.restore();
   }
@@ -4014,77 +4234,50 @@
     ctx.restore();
   }
 
-  function drawPlayer() {
-    drawShadow(player.x, player.y, 0.3);
-    const p = worldToScreen(player.x, player.y);
-    const cx = p.x;
-    const cy = p.y + TILE_H/2;
-    // Render the character a little smaller, scaled around the feet.
-    ctx.save();
-    const PLAYER_SCALE = 0.9;
-    ctx.translate(cx, cy);
-    ctx.scale(PLAYER_SCALE, PLAYER_SCALE);
-    ctx.translate(-cx, -cy);
-    // While hurtT is active (just took a hit), the body parts flash red.
-    const hurt = player.hurtT > 0;
-    // Pre-compute the gun's screen direction up here so the stock can be drawn
-    // BEFORE the body (lets the body partially hide the butt, like a shouldered gun)
-    // while the barrel is still drawn afterward, on top.
-    const a = player.dir;
+  // ----- Keeper weapon-rendering helpers ---------------------------------
+  // The host and the guest's view of the host both need the same gun/sword,
+  // muzzle flash and gun-status badge. These helpers consume a "keeper" that
+  // carries the animation timers (player or player2) and read the upgrade
+  // ladder + ammo state from module-level globals (synced on the guest).
+
+  // Compute the gun's screen-space direction vector (gx, gy) and the y of the
+  // grip point. Applies the Gun Twirl spin so the gun rotates while reloading.
+  function keeperGunVec(keeper, cy) {
+    const a = keeper.dir;
     const dirX = Math.cos(a), dirY = Math.sin(a);
     const sxv = (dirX - dirY);
     const syv = (dirX + dirY) * 0.5;
     const m = Math.hypot(sxv, syv) || 1;
     let gx = sxv / m, gy = syv / m;
     const gunY = cy - 18;
-    // Gun Twirl: spin the whole gun a full 360° around the action point.
-    if (player.spinT > 0) {
-      const prog = 1 - player.spinT / SPIN_RELOAD_TIME;
+    if (keeper.spinT > 0) {
+      const prog = 1 - keeper.spinT / SPIN_RELOAD_TIME;
       const sa = prog * Math.PI * 2;
       const cs = Math.cos(sa), sn = Math.sin(sa);
       const rgx = gx * cs - gy * sn;
       gy = gx * sn + gy * cs;
       gx = rgx;
     }
-    // Stock — short wooden butt (only when the gun is in hand, not the sword).
-    if (upgradeLevels.sword < 1) {
-      ctx.save();
-      ctx.strokeStyle = '#7a4f25';
-      ctx.lineWidth = 4;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(cx, gunY);
-      ctx.lineTo(cx - gx * 7, gunY - gy * 7);
-      ctx.stroke();
-      ctx.restore();
-    }
-    // Body
-    ctx.fillStyle = hurt ? '#ff5555' : playerShirtColor();
-    roundedRect(cx - 7, cy - 25, 14, 17, 3);
-    // Head
-    ctx.fillStyle = hurt ? '#ff8a8a' : '#f1c27d';
+    return { gx, gy, gunY };
+  }
+
+  // Short wooden butt behind the body. Drawn BEFORE the body so the body
+  // partially hides it (like a shouldered gun).
+  function drawKeeperStock(cx, gunY, gx, gy) {
+    if (upgradeLevels.sword >= 1) return; // no stock when carrying the sword
+    ctx.save();
+    ctx.strokeStyle = '#7a4f25';
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.arc(cx, cy - 30, 6, 0, Math.PI*2);
-    ctx.fill();
-    // Hats — the player's health. Starts at START_HATS, stacked on the head;
-    // each wolf hit knocks the top one off until none remain.
-    const HAT_STEP = 5;
-    for (let i = 0; i < playerHats; i++) {
-      const by = cy - 34 - i * HAT_STEP;
-      ctx.fillStyle = hurt ? '#c0392b' : (hatColors[i] || '#5a3825');
-      ctx.beginPath();
-      ctx.ellipse(cx, by, 8, 2.5, 0, 0, Math.PI*2);
-      ctx.fill();
-      ctx.fillRect(cx - 5, by - 4, 10, 4);
-    }
-    // Legs — alternate lifting while walking
-    const legPhase = player.moving ? Math.sin(player.walkT) : 0;
-    const lLift = Math.max(0, legPhase) * 2;
-    const rLift = Math.max(0, -legPhase) * 2;
-    ctx.fillStyle = hurt ? '#7a1a1a' : '#222';
-    ctx.fillRect(cx - 5, cy - 10, 3, 8 - lLift);
-    ctx.fillRect(cx + 2, cy - 10, 3, 8 - rLift);
-    // Wolf's Blade: the gun is replaced by a sword held toward the aim point.
+    ctx.moveTo(cx, gunY);
+    ctx.lineTo(cx - gx * 7, gunY - gy * 7);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Sword (Wolf's Blade) or shotgun + decorations + muzzle flash.
+  function drawKeeperWeapon(keeper, cx, cy, gunY, gx, gy) {
     if (upgradeLevels.sword >= 1) {
       const px0 = -gy, py0 = gx;       // perpendicular to the blade
       const bladeLen = 24;
@@ -4122,16 +4315,15 @@
       ctx.moveTo(cx + gx * (bladeLen * 0.5), gunY + gy * (bladeLen * 0.5));
       ctx.lineTo(cx + gx * bladeLen, gunY + gy * bladeLen);
       ctx.stroke();
-    } else {
-    // Barrel — uses the screen direction computed above the body. Grows a touch with each Longer Barrel upgrade.
+      return;
+    }
+    // Barrel — uses the screen direction. Grows a touch with each Longer Barrel pick.
     const barrelLength = 16 + upgradeLevels.range * 0.6;
-    // Barrel color reflects state: red flash on jam, dim when empty, dark when
-    // loaded — and Rusty Springs tints it rustier, turning golden at max.
     let barrelColor = '#2b2b2b';
-    if (player.jamT > 0)             barrelColor = '#ff3c3c';
+    if (keeper.jamT > 0)              barrelColor = '#ff3c3c';
     else if (upgradeLevels.rust >= 5) barrelColor = '#ffcf3a'; // golden gun
     else if (upgradeLevels.rust > 0)  barrelColor = RUST_COLORS[upgradeLevels.rust];
-    else if (!chambered)             barrelColor = '#6a6a6a';
+    else if (!chambered)              barrelColor = '#6a6a6a';
     ctx.strokeStyle = barrelColor;
     ctx.lineWidth = 3;
     ctx.beginPath();
@@ -4140,12 +4332,11 @@
     ctx.stroke();
     ctx.fillStyle = '#6b3f1e';
     ctx.beginPath();
-    ctx.arc(cx + gx * 4, gunY + gy * 4, 2.5, 0, Math.PI*2);
+    ctx.arc(cx + gx * 4, gunY + gy * 4, 2.5, 0, Math.PI * 2);
     ctx.fill();
-    // Pattern-mastery weapon detail (minimalist): a maxed Loose Pattern flares
-    // the muzzle into a funnel; a maxed Tighter Pattern adds a small scope.
-    const px = -gy, py = gx; // perpendicular to the barrel
+    const px = -gy, py = gx;
     if (upgradeLevels.spreadUp >= MAX_LEVEL) {
+      // Loose Pattern MAX: muzzle flare into a funnel.
       const tipX = cx + gx * barrelLength, tipY = gunY + gy * barrelLength;
       const baseX = cx + gx * (barrelLength - 5), baseY = gunY + gy * (barrelLength - 5);
       ctx.fillStyle = barrelColor;
@@ -4157,24 +4348,24 @@
       ctx.closePath();
       ctx.fill();
     } else if (upgradeLevels.spreadDown >= MAX_LEVEL) {
+      // Tighter Pattern MAX: scope on top.
       const mx2 = cx + gx * (barrelLength * 0.4), my2 = gunY + gy * (barrelLength * 0.4);
-      const ax = mx2 + px * 4, ay = my2 + py * 4; // scope centre
+      const ax = mx2 + px * 4, ay = my2 + py * 4;
       ctx.strokeStyle = '#2b2b2b';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(mx2, my2); ctx.lineTo(ax, ay); // mount post
+      ctx.moveTo(mx2, my2); ctx.lineTo(ax, ay);
       ctx.stroke();
       ctx.lineWidth = 2.5;
       ctx.beginPath();
-      ctx.moveTo(ax - gx * 3, ay - gy * 3); ctx.lineTo(ax + gx * 3, ay + gy * 3); // scope tube
+      ctx.moveTo(ax - gx * 3, ay - gy * 3); ctx.lineTo(ax + gx * 3, ay + gy * 3);
       ctx.stroke();
       ctx.fillStyle = '#9fd8ff';
       ctx.beginPath();
-      ctx.arc(ax + gx * 3, ay + gy * 3, 1.3, 0, Math.PI * 2); // lens glint
+      ctx.arc(ax + gx * 3, ay + gy * 3, 1.3, 0, Math.PI * 2);
       ctx.fill();
     }
     if (upgradeLevels.doubleBarrel > 0) {
-      // Double-Barrel: a second pipe running alongside the main barrel.
       ctx.strokeStyle = barrelColor;
       ctx.lineWidth = 2.5;
       ctx.beginPath();
@@ -4183,9 +4374,8 @@
       ctx.stroke();
     }
     if (upgradeLevels.machineGun > 0) {
-      // Machine-Gun: a magazine hanging under the gun — forms a 'T'.
       let dnx = px, dny = py;
-      if (dny < 0) { dnx = -dnx; dny = -dny; } // ensure it hangs down-screen
+      if (dny < 0) { dnx = -dnx; dny = -dny; }
       const mbx = cx + gx * 5, mby = gunY + gy * 5;
       ctx.strokeStyle = '#2b2b2b';
       ctx.lineWidth = 3.5;
@@ -4194,20 +4384,22 @@
       ctx.lineTo(mbx + dnx * 8, mby + dny * 8);
       ctx.stroke();
     }
-    // Muzzle flash
-    if (player.reloadT > 0.3) {
+    // Muzzle flash — bright yellow puff right after firing.
+    if (keeper.reloadT > 0.3) {
       ctx.fillStyle = 'rgba(255,220,80,0.9)';
       ctx.beginPath();
-      ctx.arc(cx + gx * (barrelLength + 2), gunY + gy * (barrelLength + 2), 4, 0, Math.PI*2);
+      ctx.arc(cx + gx * (barrelLength + 2), gunY + gy * (barrelLength + 2), 4, 0, Math.PI * 2);
       ctx.fill();
     }
-    }
+  }
 
-    // Status badge above the hat stack — green dot = loaded, gray = empty, red flashing = jammed
-    const hatTopY = playerHats > 0 ? cy - 38 - (playerHats - 1) * HAT_STEP : cy - 36;
+  // Gun-status indicator (small square above the hat stack).
+  function drawKeeperBadge(keeper, cx, cy, hatCount) {
+    const HAT_STEP = 5;
+    const hatTopY = hatCount > 0 ? cy - 38 - (hatCount - 1) * HAT_STEP : cy - 36;
     const badgeY = hatTopY - 7;
     let badgeColor;
-    if (player.jamT > 0) badgeColor = (Math.floor(player.jamT * 12) & 1) ? '#ff3c3c' : '#3a0000';
+    if (keeper.jamT > 0) badgeColor = (Math.floor(keeper.jamT * 12) & 1) ? '#ff3c3c' : '#3a0000';
     else if (reloadingT > 0) badgeColor = '#ffd166';
     else if (chambered) badgeColor = '#4be04b';
     else badgeColor = '#888';
@@ -4216,14 +4408,75 @@
     ctx.strokeStyle = '#000';
     ctx.lineWidth = 1;
     ctx.strokeRect(cx - 2, badgeY, 4, 4);
-    // Show a small "X" on the badge when jammed
-    if (player.jamT > 0) {
+    if (keeper.jamT > 0) {
       ctx.strokeStyle = '#fff';
       ctx.beginPath();
       ctx.moveTo(cx - 2, badgeY); ctx.lineTo(cx + 2, badgeY + 4);
       ctx.moveTo(cx + 2, badgeY); ctx.lineTo(cx - 2, badgeY + 4);
       ctx.stroke();
     }
+  }
+
+  function drawPlayer() {
+    if (!player.ghost) drawShadow(player.x, player.y, 0.3);
+    const p = worldToScreen(player.x, player.y);
+    const cx = p.x;
+    const cy = p.y + TILE_H/2;
+    // Render the character a little smaller, scaled around the feet.
+    ctx.save();
+    // Ghost keepers render translucent — they've died but still wander.
+    if (player.ghost) ctx.globalAlpha = 0.45;
+    const PLAYER_SCALE = 0.9;
+    ctx.translate(cx, cy);
+    ctx.scale(PLAYER_SCALE, PLAYER_SCALE);
+    ctx.translate(-cx, -cy);
+    // While hurtT is active (just took a hit), the body parts flash red.
+    const hurt = player.hurtT > 0;
+    // On a guest client this function is rendering the guest keeper — the
+    // same character the host sees as player2. No gun, no status badge,
+    // straw hats to match the host's view.
+    const isGuestSelf = multiplayer && !isHost;
+    // Pre-compute the gun's screen direction so the stock can be drawn BEFORE
+    // the body (body partially hides the butt) while the barrel is drawn
+    // afterward, on top.
+    const gunVec = keeperGunVec(player, cy);
+    const gx = gunVec.gx, gy = gunVec.gy, gunY = gunVec.gunY;
+    // Stock — drawn before the body. Guests have no gun, so it's hidden for
+    // the guest's view of their own keeper.
+    if (!isGuestSelf) drawKeeperStock(cx, gunY, gx, gy);
+    // Body
+    ctx.fillStyle = hurt ? '#ff5555' : playerShirtColor();
+    roundedRect(cx - 7, cy - 25, 14, 17, 3);
+    // Head
+    ctx.fillStyle = hurt ? '#ff8a8a' : '#f1c27d';
+    ctx.beginPath();
+    ctx.arc(cx, cy - 30, 6, 0, Math.PI*2);
+    ctx.fill();
+    // Hats — the player's health. Starts at START_HATS, stacked on the head;
+    // each wolf hit knocks the top one off until none remain.
+    const HAT_STEP = 5;
+    for (let i = 0; i < playerHats; i++) {
+      const by = cy - 34 - i * HAT_STEP;
+      const baseHat = isGuestSelf ? GUEST_HAT_COLOR : (hatColors[i] || '#5a3825');
+      ctx.fillStyle = hurt ? '#c0392b' : baseHat;
+      ctx.beginPath();
+      ctx.ellipse(cx, by, 8, 2.5, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillRect(cx - 5, by - 4, 10, 4);
+    }
+    // Legs — alternate lifting while walking
+    const legPhase = player.moving ? Math.sin(player.walkT) : 0;
+    const lLift = Math.max(0, legPhase) * 2;
+    const rLift = Math.max(0, -legPhase) * 2;
+    ctx.fillStyle = hurt ? '#7a1a1a' : '#222';
+    ctx.fillRect(cx - 5, cy - 10, 3, 8 - lLift);
+    ctx.fillRect(cx + 2, cy - 10, 3, 8 - rLift);
+    // Weapon (sword or gun + decorations + muzzle flash) — hidden when this
+    // function is rendering the guest's own keeper (the guest carries nothing).
+    if (!isGuestSelf) drawKeeperWeapon(player, cx, cy, gunY, gx, gy);
+
+    // Gun-status indicator above the hat stack — same gating as the weapon.
+    if (!isGuestSelf) drawKeeperBadge(player, cx, cy, playerHats);
     ctx.restore();
     // Melee-swing arc — drawn unscaled, around the player's torso.
     if (player.meleeT > 0) {
@@ -4249,16 +4502,25 @@
   // Second player — drawn like the keeper but in blue. Carries its own hat
   // stack as health, flashes red when hit.
   function drawPlayer2() {
-    drawShadow(player2.x, player2.y, 0.3);
+    if (!player2.ghost) drawShadow(player2.x, player2.y, 0.3);
     const p = worldToScreen(player2.x, player2.y);
     const cx = p.x;
     const cy = p.y + TILE_H / 2;
     ctx.save();
+    // Ghost partner renders translucent — they died but still wander.
+    if (player2.ghost) ctx.globalAlpha = 0.45;
     const PLAYER_SCALE = 0.9;
     ctx.translate(cx, cy);
     ctx.scale(PLAYER_SCALE, PLAYER_SCALE);
     ctx.translate(-cx, -cy);
     const hurt = player2.hurtT > 0;
+    // Only the guest's screen shows the host (which carries the weapon).
+    // On the host's screen, player2 IS the guest (no weapon).
+    const showWeapon = multiplayer && !isHost;
+    // Pre-compute gun vector so the stock can be drawn before the body.
+    const gunVec = keeperGunVec(player2, cy);
+    const gx = gunVec.gx, gy = gunVec.gy, gunY = gunVec.gunY;
+    if (showWeapon) drawKeeperStock(cx, gunY, gx, gy);
     // Body — blue shirt by default, red flash on hit.
     ctx.fillStyle = hurt ? '#ff5555' : '#3a6ea5';
     roundedRect(cx - 7, cy - 25, 14, 17, 3);
@@ -4268,11 +4530,14 @@
     ctx.arc(cx, cy - 30, 6, 0, Math.PI * 2);
     ctx.fill();
     // Hat stack — same mechanic as player1: one per remaining HP.
+    // Colour by which role the OTHER keeper plays: the host sees player2 as
+    // the guest (straw hat); the guest sees player2 as the host (brown hat).
     const HAT_STEP = 5;
     const hatCount = Math.max(0, player2.hats || 0);
+    const p2HatColor = isHost ? GUEST_HAT_COLOR : '#5a3825';
     for (let i = 0; i < hatCount; i++) {
       const by = cy - 34 - i * HAT_STEP;
-      ctx.fillStyle = hurt ? '#c0392b' : '#5a3825';
+      ctx.fillStyle = hurt ? '#c0392b' : p2HatColor;
       ctx.beginPath();
       ctx.ellipse(cx, by, 8, 2.5, 0, 0, Math.PI * 2);
       ctx.fill();
@@ -4285,7 +4550,17 @@
     ctx.fillStyle = hurt ? '#7a1a1a' : '#222';
     ctx.fillRect(cx - 5, cy - 10, 3, 8 - lLift);
     ctx.fillRect(cx + 2, cy - 10, 3, 8 - rLift);
+    // Weapon — barrel/sword + decorations + muzzle flash, plus the gun-status
+    // badge. Only drawn when this is the guest's view of the host.
+    if (showWeapon) {
+      drawKeeperWeapon(player2, cx, cy, gunY, gx, gy);
+      drawKeeperBadge(player2, cx, cy, hatCount);
+    }
     ctx.restore();
+    // Melee-swing arc — drawn outside the player scale, around the torso.
+    if (showWeapon && player2.meleeT > 0) {
+      drawMeleeArc(cx, cy - 16, player2.meleeDir, player2.meleeFull, player2.meleeT);
+    }
   }
 
   function drawCoop(c) {
@@ -4621,7 +4896,7 @@
     // Fleeing indicator (not mirrored — reads the same either way)
     if (c.fleeT > 0) {
       ctx.fillStyle = '#fff';
-      ctx.font = 'bold 12px system-ui';
+      ctx.font = 'bold 12px "Lucida Console", Consolas, monospace';
       ctx.fillText('!', cx - 3, cy - 22);
     }
   }
@@ -4973,11 +5248,107 @@
     ctx.globalAlpha = 1;
   }
 
-  // Initial onboarding toast — the wave timer handles the actual first wave
-  setTimeout(() => toast('Build a coop with E to get chickens!', 3), 500);
+  // Drop the current run and return to the title menu. Tears down any MP
+  // connection, restores the ambient demo, and resets per-run state so the
+  // next pick starts cleanly.
+  function quitToMenu() {
+    if (typeof teardownConnection === 'function') teardownConnection();
+    multiplayer = false;
+    isHost = false;
+    netRole = null;
+    player2.active = false;
+    // Overlay / pause / game-over state.
+    paused = false;
+    upgradeMode = false;
+    upgradeOptions = [];
+    upgradeDelayT = 0;
+    gameOver = false;
+    gameOverMsg = '';
+    gameOverCause = '';
+    buildMode = false;
+    // Per-run player state.
+    playerHats = START_HATS;
+    hatColors.length = 0;
+    for (let i = 0; i < START_HATS; i++) hatColors.push('#5a3825');
+    player.hurtT = 0;
+    player.jamT = 0;
+    player.reloadT = 0;
+    player.meleeT = 0;
+    player.spinT = 0;
+    player.runT = 0;
+    chambered = true;
+    reloadingT = 0;
+    ammo = 0;
+    magDumpLeft = 0;
+    jamStreak = 0;
+    karma = 0;
+    hatPrice = 20;
+    hatsBought = 0;
+    swordWolfSlain = false;
+    swordWolfAppeared = false;
+    chickensKilledByPlayer = 0;
+    wolfLevelCap = 0;
+    dogGen = 1;
+    // Reset upgrades + derived stats so the gun matches level 0 again.
+    for (const k in upgradeLevels) upgradeLevels[k] = 0;
+    shotgunLife = 0.30;
+    shotgunCooldown = 0.75;
+    shotgunSpread = 10 * Math.PI / 180;
+    pelletCount = 4;
+    wolfFocusChance = 0.50;
+    wolfRushSpeed = 1.0;
+    recomputeJamChance();
+    player.speed = 4.0;
+    // Wipe the world and stand up the ambient backdrop.
+    resetWorld();
+    populateMenuDemo();
+    // Surface the menu overlay.
+    inMenu = true;
+    document.body.classList.add('in-menu');
+    const menu = document.getElementById('menu');
+    if (menu) menu.style.display = '';
+    if (typeof showScreen === 'function') showScreen('title');
+  }
 
-  // ---------- DEBUG PANEL — remove for production ----------
-  (function setupDebugPanel() {
+  // Wipe every entity array + run-progress scalar so a fresh game starts
+  // clean after the menu demo (or after a previous session in MP).
+  function resetWorld() {
+    coops.length = 0;
+    chickens.length = 0;
+    wolves.length = 0;
+    pellets.length = 0;
+    corpses.length = 0;
+    fences.length = 0;
+    farms.length = 0;
+    dogs.length = 0;
+    smoke.length = 0;
+    blasts.length = 0;
+    player.x = 0;
+    player.y = 0;
+    player.ghost = false;
+    player2.ghost = false;
+    hostPaused = false;
+    money = 10;
+    kills = 0;
+    wave = 0;
+    waveTimer = 12;
+    waveActive = false;
+    pendingSpawns = 0;
+    coopsPlaced = 0;
+    pendingMapExpansions = 0;
+  }
+
+  // Lay down a small ambient farm — two coops with chickens wandering —
+  // so the menu sits over a living world instead of an empty meadow.
+  function populateMenuDemo() {
+    coops.push({ x: -3, y: 1,  spawnT: 6, hp: 3, builtWave: 0, level: 0, dirtR: 1.2 });
+    coops.push({ x: 3,  y: -2, spawnT: 9, hp: 3, builtWave: 0, level: 0, dirtR: 1.0 });
+    for (let i = 0; i < 6; i++) spawnChicken(coops[i % coops.length]);
+  }
+  populateMenuDemo();
+
+  // ---------- DEBUG PANEL — gated by the DEBUG flag at top of the IIFE ----------
+  if (DEBUG) (function setupDebugPanel() {
     const root = document.getElementById('debug');
     const toggle = document.getElementById('debug-toggle');
     const upgradesRow = document.getElementById('debug-upgrades');
@@ -4998,6 +5369,7 @@
       if (immortalBtn) immortalBtn.textContent = 'Immortal: ' + (immortal ? 'ON' : 'OFF');
     }
     refreshImmortalButton();
+
 
     toggle.addEventListener('click', () => root.classList.toggle('open'));
 
@@ -5040,6 +5412,24 @@
     swordBtn.textContent = 'Spawn sword wolf';
     swordBtn.title = 'Spawn a single sword wolf';
     upgradesRow.appendChild(swordBtn);
+
+    const bombBtn = document.createElement('button');
+    bombBtn.dataset.debug = 'spawn-bomb';
+    bombBtn.textContent = 'Spawn exploding wolf';
+    bombBtn.title = 'Spawn a single bomb wolf (wall sapper)';
+    upgradesRow.appendChild(bombBtn);
+
+    const karmaMaxBtn = document.createElement('button');
+    karmaMaxBtn.dataset.debug = 'karma-max';
+    karmaMaxBtn.textContent = 'Max karma';
+    karmaMaxBtn.title = 'Slam karma to +' + (typeof KARMA_MAX !== 'undefined' ? KARMA_MAX : 'MAX');
+    upgradesRow.appendChild(karmaMaxBtn);
+
+    const karmaMinBtn = document.createElement('button');
+    karmaMinBtn.dataset.debug = 'karma-min';
+    karmaMinBtn.textContent = 'Min karma';
+    karmaMinBtn.title = 'Slam karma to -' + (typeof KARMA_MAX !== 'undefined' ? KARMA_MAX : 'MAX');
+    upgradesRow.appendChild(karmaMinBtn);
 
     const skipBtn = document.createElement('button');
     skipBtn.dataset.debug = 'skip-waves-10';
@@ -5088,6 +5478,14 @@
           ws.sword = true;
           toast('Spawned sword wolf', 1.2);
         }
+      } else if (action === 'spawn-bomb') {
+        spawnBombWolf();
+      } else if (action === 'karma-max') {
+        karma = KARMA_MAX;
+        toast('Karma = +' + KARMA_MAX, 1.0);
+      } else if (action === 'karma-min') {
+        karma = -KARMA_MAX;
+        toast('Karma = -' + KARMA_MAX, 1.0);
       } else if (action === 'spawn-wolf-fast') {
         spawnWolf();
         // Boost the last spawned wolf to an extreme faster level
@@ -5142,6 +5540,8 @@
 
   // ---------- Title menu ----------
   function startGame(isMultiplayer) {
+    // Tear down the menu's ambient demo before the real run begins.
+    resetWorld();
     multiplayer = !!isMultiplayer;
     if (multiplayer) {
       player2.active = true;
@@ -5158,9 +5558,12 @@
     document.body.classList.remove('in-menu');
     const menu = document.getElementById('menu');
     if (menu) menu.style.display = 'none';
-    gameStarted = true;
+    inMenu = false;
     last = performance.now(); // avoid a huge dt on the first frame after the menu
     getAudio(); // priming audio off a user gesture so sounds play on first shot
+    if (!multiplayer) {
+      setTimeout(() => toast('Build a coop with E to get chickens!', 3), 500);
+    }
   }
 
   // ---------- Online lobby (PeerJS) ----------
@@ -5230,9 +5633,23 @@
     netRole = null;
   }
 
+  // Timestamp of the last message we got from the peer. The PeerJS `close`
+  // event isn't fired reliably when a tab is killed, so we also fall back to
+  // a silence timeout in loop() — if nothing arrives for NET_TIMEOUT_MS the
+  // partner is presumed gone.
+  let netLastRecv = 0;
+  let netDisconnected = false;
+  // Generous timeout — covers brief tab backgrounding (where rAF pauses
+  // entirely and setInterval is throttled to ~1Hz) without spuriously
+  // dropping the partner.
+  const NET_TIMEOUT_MS = 12000;
+
   function attachConn(c) {
     conn = c;
+    netLastRecv = performance.now();
+    netDisconnected = false;
     c.on('data', msg => {
+      netLastRecv = performance.now(); // any traffic counts as alive
       if (!msg || typeof msg !== 'object') return;
       // Guest → host: just the guest's keeper position.
       if (msg.type === 'pos' && player2.active) {
@@ -5248,11 +5665,34 @@
         return;
       }
     });
-    c.on('close', () => {
-      conn = null;
-      toast('Other player disconnected', 2.5);
-    });
-    c.on('error', e => console.warn('[Conn] error', e));
+    c.on('close', () => handlePeerGone('close'));
+    c.on('error', e => { console.warn('[Conn] error', e); handlePeerGone('error'); });
+  }
+
+  // One place to react to the other player going away — runs at most once
+  // per disconnect. `reason` is just for logging.
+  function handlePeerGone(reason) {
+    if (netDisconnected) return;
+    netDisconnected = true;
+    console.log('[Net] peer gone:', reason);
+    if (conn) { try { conn.close(); } catch (_) {} conn = null; }
+    if (!multiplayer) return; // already left the lobby — nothing to do
+    if (isHost) {
+      // The guest left — drop them from the world and play on solo.
+      if (player2.active) {
+        player2.active = false;
+        // Long, prominent toast so the host actually sees it.
+        toast('Your partner left the game', 5);
+      }
+    } else if (!inMenu) {
+      // The host is gone — the guest can't simulate anything, so end the run.
+      gameOver = true;
+      gameOverCause = '';
+      gameOverMsg = 'The host left the game. Press Q for menu or F5 to restart.';
+      toast('Host left the game', 5);
+    } else {
+      toast('Disconnected from host', 3);
+    }
   }
 
   function netSendPosition() {
@@ -5302,11 +5742,21 @@
         host: {
           x: player.x, y: player.y, dir: player.dir, moving: !!player.moving,
           walkT: player.walkT, hats: playerHats, hurtT: player.hurtT,
+          // Weapon-animation timers so the guest can render the host's
+          // gun/sword/melee swing with the right state every frame.
+          reloadT: player.reloadT, jamT: player.jamT, spinT: player.spinT,
+          meleeT: player.meleeT, meleeDir: player.meleeDir, meleeFull: !!player.meleeFull,
         },
-        guest: { hats: player2.hats, hurtT: player2.hurtT },
+        guest: { hats: player2.hats, hurtT: player2.hurtT, ghost: player2.ghost },
         // Mirror the host's overlay state so the guest's render matches.
         upgradeMode: upgradeMode,
         paused: paused,
+        // Host's upgrade levels + ammo/chamber state — needed to draw the
+        // gun on the guest (which barrel, which decorations, etc.).
+        upgrades: Object.assign({}, upgradeLevels),
+        chambered: chambered,
+        reloadingT: reloadingT,
+        ammo: ammo,
         wolves:   snapList(wolves,   SNAP_FIELDS.wolves),
         chickens: snapList(chickens, SNAP_FIELDS.chickens),
         coops:    snapList(coops,    SNAP_FIELDS.coops),
@@ -5326,7 +5776,10 @@
         gameOver: gameOver,
         gameOverMsg: gameOverMsg,
         gameOverCause: gameOverCause,
+        // One-shot sound events fired since the last snapshot — guest replays.
+        sounds: pendingNetSounds.length ? pendingNetSounds.slice() : null,
       });
+      pendingNetSounds.length = 0; // queue is drained on every send
     } catch (e) { /* channel may be mid-teardown */ }
   }
 
@@ -5346,7 +5799,21 @@
       // Host's hat count drives how player2 is drawn on the guest.
       if (typeof msg.host.hats === 'number') player2.hats = msg.host.hats;
       if (typeof msg.host.hurtT === 'number') player2.hurtT = msg.host.hurtT;
+      // Weapon animation timers — drive gun spin / muzzle flash / melee arc.
+      player2.reloadT = msg.host.reloadT || 0;
+      player2.jamT = msg.host.jamT || 0;
+      player2.spinT = msg.host.spinT || 0;
+      player2.meleeT = msg.host.meleeT || 0;
+      player2.meleeDir = msg.host.meleeDir || 0;
+      player2.meleeFull = !!msg.host.meleeFull;
     }
+    // Mirror the host's upgrade ladder + ammo/chamber state. Used by
+    // drawPlayer2's weapon block and by entity rendering (coop chimneys,
+    // fence spikes etc) so visuals match across both clients.
+    if (msg.upgrades) Object.assign(upgradeLevels, msg.upgrades);
+    if (typeof msg.chambered === 'boolean') chambered = msg.chambered;
+    if (typeof msg.reloadingT === 'number') reloadingT = msg.reloadingT;
+    if (typeof msg.ammo === 'number') ammo = msg.ammo;
     // Host echoes the guest's own hat count back so the guest sees its damage.
     if (msg.guest) {
       if (typeof msg.guest.hats === 'number') {
@@ -5356,9 +5823,18 @@
         while (hatColors.length < playerHats) hatColors.push('#5a3825');
       }
       if (typeof msg.guest.hurtT === 'number') player.hurtT = msg.guest.hurtT;
+      // Ghost transition — first time the host marks us dead, toast + go spectral.
+      if (typeof msg.guest.ghost === 'boolean') {
+        const wasGhost = player.ghost;
+        player.ghost = msg.guest.ghost;
+        if (!wasGhost && player.ghost) {
+          toast('You died — wandering as a ghost. The hunt goes on!', 3.2);
+        }
+      }
     }
     // Mirror the host's overlay state (upgrade panel currently open, paused).
     upgradeMode = !!msg.upgradeMode;
+    hostPaused = !!msg.paused;
     replaceArray(wolves,   msg.wolves);
     replaceArray(chickens, msg.chickens);
     replaceArray(coops,    msg.coops);
@@ -5377,6 +5853,11 @@
     gameOver = !!msg.gameOver;
     gameOverMsg = msg.gameOverMsg || '';
     gameOverCause = msg.gameOverCause || '';
+    // Replay every sound the host fired since the last snapshot. Each play*()
+    // self-queues only when isHost, so the guest's replay never echoes back.
+    if (msg.sounds && msg.sounds.length) {
+      for (let i = 0; i < msg.sounds.length; i++) playSoundByName(msg.sounds[i]);
+    }
     // The host's map grows as they place coops; mirror the new bounds and
     // regenerate the forest border so the guest's render matches.
     if (msg.mapSize !== MAP_SIZE) {
@@ -5467,7 +5948,19 @@
   });
 
   requestAnimationFrame(loop);
+
+  // Heartbeat — fires regardless of requestAnimationFrame, which pauses
+  // entirely when the tab is backgrounded/minimised. setInterval is still
+  // throttled to ~1Hz in that state but that single ping per second is
+  // enough to keep the partner's silence-timeout from tripping, so a host
+  // alt-tabbing for a few seconds no longer drops the guest.
+  setInterval(() => {
+    if (!gameStarted || !multiplayer || !conn || !conn.open) return;
+    if (isHost) netSendSnapshot();
+    else        netSendPosition();
+  }, 1000);
 })();
 </script>
 </body>
 </html>
+
