@@ -285,6 +285,33 @@
   }
   #menu .status.is-bad  { color: #ff7676; }
   #menu .status.is-good { color: #7fdc7f; }
+  #menu .lobby-opts {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 8px auto 12px auto;
+    width: 240px;
+  }
+  #menu .lobby-opt {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: rgba(255,255,255,0.06);
+    color: #fff;
+    border: 2px solid rgba(255,255,255,0.18);
+    border-radius: 0;
+    font-family: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  #menu .lobby-opt:hover { border-color: #ffd166; }
+  #menu .lobby-opt[data-on="1"] { border-color: #ffd166; background: rgba(255,209,102,0.14); }
+  #menu .lobby-opt[data-on="1"] .lobby-opt-val { color: #ffd166; }
+  #menu .lobby-opt-label { color: #d9c89a; }
+  #menu .lobby-opt-val { color: #9aa0a8; font-weight: bold; }
   body.in-menu #hud,
   body.in-menu #help,
   body.in-menu #debug { display: none; }
@@ -341,6 +368,20 @@
       <h1 class="menu-title" style="font-size:26px">Hosting</h1>
       <p class="menu-sub">Lobby code — share with the other player.</p>
       <p class="lobby-code" id="lobbyCode"></p>
+      <div class="lobby-opts" id="lobbyOpts">
+        <button type="button" class="lobby-opt" data-opt="friendlyFire" data-on="0">
+          <span class="lobby-opt-label">Friendly fire</span>
+          <span class="lobby-opt-val">OFF</span>
+        </button>
+        <button type="button" class="lobby-opt" data-opt="separateMoney" data-on="0">
+          <span class="lobby-opt-label">Money</span>
+          <span class="lobby-opt-val">SHARED</span>
+        </button>
+        <button type="button" class="lobby-opt" data-opt="individualUpgrades" data-on="0">
+          <span class="lobby-opt-label">Upgrades</span>
+          <span class="lobby-opt-val">HOST PICKS</span>
+        </button>
+      </div>
       <p class="status" id="hostStatus">Connecting to broker…</p>
     </section>
 
@@ -393,6 +434,7 @@
       <button data-debug="toggle-wave-autostart" id="debug-wave-autostart-btn">Pause wave start</button>
       <button data-debug="add-hat">Add hat</button>
       <button data-debug="toggle-immortal" id="debug-immortal-btn">Immortal: OFF</button>
+      <button data-debug="resurrect-self">Resurrect self</button>
     </div>
     <div class="debug-row" id="debug-upgrades">
       <span class="debug-label">Upgrades</span>
@@ -412,12 +454,18 @@
   if (!PIXELATE) document.body.classList.remove('pixelate-all');
 
   // Master toggle for the developer debug panel (top-right). false hides it
-  // and skips its setup so none of the helper buttons exist.
+  // and skips its setup so none of the helper buttons exist. When true the
+  // panel still loads but stays hidden until the player types DEBUG_PHRASE
+  // on the keyboard — keeps casual players from seeing dev controls.
   const DEBUG = true;
-  if (!DEBUG) {
+  const DEBUG_PHRASE = 'debug';
+  // The debug element is hidden out of the gate (regardless of DEBUG). For
+  // DEBUG=false it stays hidden forever; for DEBUG=true it unhides once the
+  // phrase has been typed.
+  (function hideDebugInitially() {
     const dbg = document.getElementById('debug');
     if (dbg) dbg.style.display = 'none';
-  }
+  })();
 
   // ---------- Canvas setup ----------
   const canvas = document.getElementById('game');
@@ -845,10 +893,34 @@
   // ---------- Input ----------
   const keys = {};
   const mouse = { x: 0, y: 0, down: false };
+  // Rolling buffer of the last few letters typed — matched against
+  // DEBUG_PHRASE to reveal the debug panel. Sticks around once unlocked.
+  let debugUnlocked = false;
+  let debugTypedBuffer = '';
+  function trackDebugPhrase(key) {
+    if (!DEBUG || debugUnlocked) return;
+    // Only letters count; everything else flushes the buffer.
+    if (!/^[a-zA-Z]$/.test(key)) { debugTypedBuffer = ''; return; }
+    debugTypedBuffer = (debugTypedBuffer + key.toLowerCase()).slice(-DEBUG_PHRASE.length);
+    if (debugTypedBuffer === DEBUG_PHRASE) {
+      debugUnlocked = true;
+      const dbg = document.getElementById('debug');
+      if (dbg) dbg.style.display = '';
+      toast('Debug panel unlocked', 1.6);
+    }
+  }
   window.addEventListener('keydown', e => {
     // Title/lobby menu is up — let inputs (join code) work, but no game keys.
     if (inMenu) return;
+    trackDebugPhrase(e.key);
     if (upgradeMode) {
+      // Guest in individual-upgrade mode picks its own option locally.
+      if (multiplayer && !isHost && gameOpts.individualUpgrades) {
+        if (e.key === '1') { selectUpgradeP2(0); return; }
+        if (e.key === '2') { selectUpgradeP2(1); return; }
+        if (e.key === '3') { selectUpgradeP2(2); return; }
+        return;
+      }
       if (e.key === '1') { selectUpgrade(0); return; }
       if (e.key === '2') { selectUpgrade(1); return; }
       if (e.key === '3') { selectUpgrade(2); return; }
@@ -866,11 +938,23 @@
       quitToMenu();
       return;
     }
+    // F5 on the game-over screen restarts the run directly instead of the
+    // browser-default page reload that bounces back through the menu.
+    if (e.key === 'F5' && gameOver) {
+      e.preventDefault();
+      restartRun();
+      return;
+    }
     if (paused) return;
     if (e.key.toLowerCase() === 'e') {
       e.preventDefault();
+      // Guest forwards build actions to the host (host owns the world).
+      if (multiplayer && !isHost) {
+        sendP2Input('buildToggle');
+        return;
+      }
       if (buildMode) {
-        placeBuilding();
+        placeBuilding(player);
       } else {
         // Enter build mode and select first unlocked build type
         buildMode = true;
@@ -882,8 +966,15 @@
           if (t === 'farm' && upgradeLevels.farm < 1) continue;
           buildType = i; break;
         }
-        toast(buildModeToast());
+        player.buildMode = true;
+        player.buildType = buildType;
+        toast(buildModeToast(player));
       }
+      return;
+    }
+    // Guest forwards reload key to host (host is authoritative).
+    if (multiplayer && !isHost && e.key.toLowerCase() === 'r') {
+      sendP2Input('reload');
       return;
     }
     keys[e.key.toLowerCase()] = true;
@@ -908,7 +999,23 @@
     }
     mouse.down = true;
     if (upgradeMode) {
+      // In individual-upgrades mode the guest picks its own option locally
+      // (the host renders nothing for the guest's screen — guest's pool is in
+      // upgradeOptions2 / hit-rects come from getUpgradeOptionRects()).
+      if (multiplayer && !isHost && gameOpts.individualUpgrades) {
+        selectUpgradeP2At(mouse.x, mouse.y);
+        return;
+      }
       selectUpgradeAt(mouse.x, mouse.y);
+      return;
+    }
+    // Guest forwards every fire-action to the host (host owns the sim).
+    if (multiplayer && !isHost) {
+      const lvls = lvlsFor(player2);
+      let action = 'shoot';
+      if (e.button === 2 && lvls.doubleBarrel > 0 && lvls.sword < 1)      action = 'doubleShot';
+      else if (e.button === 2 && lvls.machineGun > 0 && lvls.sword < 1)   action = 'magDump';
+      sendP2Input(action);
       return;
     }
     if (e.button === 2 && upgradeLevels.doubleBarrel > 0 && upgradeLevels.sword < 1) { doubleShot(); return; }
@@ -920,6 +1027,14 @@
   window.addEventListener('contextmenu', e => e.preventDefault());
   // Scroll wheel cycles the building type while in build mode.
   canvas.addEventListener('wheel', e => {
+    // Guest's wheel cycles its OWN build type (mirrored from snapshot, sent
+    // back to host as a p2input scroll request).
+    if (multiplayer && !isHost) {
+      if (!player.buildMode) return;
+      e.preventDefault();
+      sendP2Input('buildScroll', { dir: e.deltaY > 0 ? 1 : -1 });
+      return;
+    }
     if (!buildMode) return;
     e.preventDefault();
     // Advance to the next unlocked build type (skip locked fences)
@@ -934,7 +1049,8 @@
       if (t === 'farm' && upgradeLevels.farm < 1) { attempts++; continue; }
       buildType = idx; break;
     }
-    toast(buildModeToast());
+    player.buildType = buildType; // keep the mirror current for buildModeToast
+    toast(buildModeToast(player));
   }, { passive: false });
 
   // ---------- Game state ----------
@@ -963,6 +1079,11 @@
     spinT: 0,           // Gun Twirl animation timer (counts down)
     spinDmg: false,     // true while a max-level twirl's double-damage shot is pending
     ghost: false,       // on the guest's screen, true once they've died — they wander on as an immortal spectre
+    karma: 0,           // per-player karma — drives the shirt tint (mirrors the legacy `karma` global)
+    chickensKilledThisWave: 0,
+    chickensShot: 0,    // lifetime chickens shot (for the end-of-run scoreboard)
+    deathCause: '',     // last reason this keeper fell — 'wolf', 'friendly fire', ...
+    bulletHitT: 0,      // bullet-damage debounce window
   };
   // Network-driven second player — a real actor: wolves target it, it takes
   // hits and dies. Hats / hurtT are authoritative on the host and synced down
@@ -988,7 +1109,79 @@
     // On the host, true once the guest's hat stack hit zero — they
     // become an immortal ghost that wolves ignore. Synced to the guest.
     ghost: false,
+    // Independent shotgun/MG state — player2 now also carries a gun.
+    chambered: true,
+    reloadingT: 0,
+    ammo: 0,
+    magDumpLeft: 0,
+    magDumpT: 0,
+    jamStreak: 0,
+    spinDmg: false,
+    runT: 0,
+    // Build mode is per-keeper so the partner can lay down coops too.
+    buildMode: false,
+    buildType: 0,
+    // Per-player karma so each keeper's shirt tint reflects their own deeds.
+    karma: 0,
+    chickensKilledThisWave: 0,
+    chickensShot: 0,
+    deathCause: '',
+    // Bullet-damage debounce — consecutive pellet hits inside this window
+    // only cost one hat (so a full shotgun blast doesn't insta-kill).
+    bulletHitT: 0,
   };
+  // Lobby-configurable multiplayer rules. The host writes these when starting
+  // the game and broadcasts them inside the snapshot; the guest mirrors them.
+  const gameOpts = {
+    friendlyFire: false,    // can players damage each other's hats?
+    separateMoney: false,   // each player has their own pot vs sharing one
+    individualUpgrades: false, // each player picks their own gun upgrades
+  };
+  // Player2's wallet (used in separateMoney mode) and gun-upgrade ladder
+  // (used in individualUpgrades mode). Both are kept in sync with the host.
+  let money2 = 10;
+  const upgradeLevels2 = { jam: 0, range: 0, speed: 0, fireRate: 0, spreadUp: 0, spreadDown: 0, focusUp: 0, focusDown: 0, woodFence: 0, stoneWall: 0, reloadMove: 0, wolfDelay: 0, hatchRate: 0, spreadUp2: 0, spreadDown2: 0, doubleBarrel: 0, machineGun: 0, counter: 0, sprint: 0, softBullet: 0, hardBullet: 0, rust: 0, spinReload: 0, snatch: 0, fatChicken: 0, farm: 0, dog: 0, sword: 0 };
+  // Pick the upgrade ladder that should govern a shooter's stats. With
+  // individual upgrades off, both players share the host's tree.
+  function lvlsFor(who) {
+    if (gameOpts.individualUpgrades && who === player2) return upgradeLevels2;
+    return upgradeLevels;
+  }
+  function tableAtFor(who, id) {
+    const lvls = lvlsFor(who);
+    const t = SKILL_TABLES[id];
+    return t[Math.min(lvls[id], t.length - 1)];
+  }
+  // Derived shotgun stats for a given shooter — when individual upgrades are
+  // off these collapse to the legacy globals (shotgunLife / shotgunCooldown /
+  // shotgunSpread / pelletCount), so player1's existing code path is untouched.
+  function shotgunLifeFor(who) {
+    if (!gameOpts.individualUpgrades || who === player) return shotgunLife;
+    return SKILL_TABLES.range[Math.min(upgradeLevels2.range, MAX_LEVEL)];
+  }
+  function shotgunCooldownFor(who) {
+    if (!gameOpts.individualUpgrades || who === player) return shotgunCooldown;
+    return SKILL_TABLES.fireRate[Math.min(upgradeLevels2.fireRate, MAX_LEVEL)];
+  }
+  function spreadStatsFor(who) {
+    if (!gameOpts.individualUpgrades || who === player) {
+      return { spread: shotgunSpread, count: pelletCount };
+    }
+    const l = upgradeLevels2;
+    if (l.spreadUp > 0) {
+      const i = Math.min(l.spreadUp + l.spreadUp2, LOOSE_SPREAD.length - 1);
+      return { spread: LOOSE_SPREAD[i] * Math.PI / 180, count: LOOSE_BULLETS[i] };
+    }
+    if (l.spreadDown > 0) {
+      const i = Math.min(l.spreadDown, MAX_LEVEL);
+      return { spread: TIGHT_SPREAD[i] * Math.PI / 180, count: TIGHT_BULLETS[i] };
+    }
+    return { spread: 10 * Math.PI / 180, count: 4 };
+  }
+  function jamChanceFor(who) {
+    if (!gameOpts.individualUpgrades || who === player) return jamChance;
+    return clamp(tableAtFor(who, 'jam') + tableAtFor(who, 'rust'), 0, 0.95);
+  }
   // Run mechanic — walking with no shots and no reload builds a little momentum.
   const RUN_WARMUP = 1.0;     // seconds of walking before the sprint kicks in
   const RUN_RAMP = 2.5;       // seconds from warm-up to a full sprint
@@ -1049,6 +1242,17 @@
   const smoke = [];     // {x,y,vx,vy,t,life,r} — drifting gunsmoke puffs
   const blasts = [];    // {x,y,t,life} — expanding fat-chicken explosion rings
 
+  // Player1's weapon state — also mirrored onto the player object so both
+  // keepers can share the same shooting code paths. These globals are kept
+  // as conveniences for the legacy fire/reload functions; player.chambered
+  // etc. always carry the same value.
+  player.chambered = true;
+  player.reloadingT = 0;
+  player.ammo = 0;
+  player.magDumpLeft = 0;
+  player.magDumpT = 0;
+  player.jamStreak = 0;
+  player.spinDmg = false;
   let chambered = true;   // single-shot shotgun: one shell ready, then you must reload
   let reloadingT = 0;     // seconds remaining on the current reload action
   let ammo = 0;           // machine-gun magazine — rounds currently loaded
@@ -1057,7 +1261,45 @@
   const MAG_DUMP_INTERVAL = 0.05; // seconds between rounds during a machine-gun mag dump
   let magDumpLeft = 0;    // rounds left in an unstoppable mag dump (right-click)
   let magDumpT = 0;       // countdown to the next mag-dump round
+  // Sync the player1 weapon mirror onto the player object every frame.
+  // On the GUEST, `player` represents the guest's own keeper and its weapon
+  // state is written by the snapshot (host echoes player2 state under
+  // `guestWeapon`), so we skip the sync there to avoid clobbering it.
+  function syncP1Weapon() {
+    if (multiplayer && !isHost) return;
+    player.chambered   = chambered;
+    player.reloadingT  = reloadingT;
+    player.ammo        = ammo;
+    player.magDumpLeft = magDumpLeft;
+    player.magDumpT    = magDumpT;
+    player.jamStreak   = jamStreak;
+    // Build globals also live on the player object so getBuildTarget /
+    // drawBuildPreview can read everything through the keeper uniformly.
+    player.buildMode   = buildMode;
+    player.buildType   = buildType;
+    player.karma       = karma;
+  }
   let money = 10;         // $ — earned per chicken alive per wave, spent on coops
+  // Money helpers — in separateMoney mode, money goes to whoever earned it
+  // (player vs player2); otherwise everything pools into `money` (legacy).
+  function addMoney(who, amount) {
+    if (!gameOpts.separateMoney || who === player) money += amount;
+    else                                            money2 += amount;
+  }
+  // Income with no specific earner (wave reward, harvest) — split when separate.
+  function addSharedMoney(amount) {
+    if (!gameOpts.separateMoney) { money += amount; return; }
+    const half = Math.floor(amount / 2);
+    money  += amount - half; // P1 keeps the rounding extra
+    money2 += half;
+  }
+  function moneyOf(who) {
+    return (gameOpts.separateMoney && who === player2) ? money2 : money;
+  }
+  function spendMoney(who, amount) {
+    if (!gameOpts.separateMoney || who === player) money -= amount;
+    else                                            money2 -= amount;
+  }
   let jamChance = 0.50; // probability that a reload jams (cranky gun)
   let jamStreak = 0;    // consecutive jams — feeds the golden-gun payout
   const COOP_COST_BASE = 10; // starting $ to build a coop
@@ -1137,6 +1379,9 @@
   let upgradeMode = false;
   let upgradeOptions = [];
   let upgradePicked = false;
+  // P2's parallel pick state — only used when gameOpts.individualUpgrades is on.
+  let upgradeOptions2 = [];
+  let upgradePicked2 = false;
   let shotgunLife = 0.30;        // level 1 of "longer barrel"
   let shotgunCooldown = 0.75;    // level 1 of "trigger work"
   let shotgunSpread = 10 * Math.PI / 180; // level 1 of the pattern skills (10°)
@@ -1637,6 +1882,31 @@
           hatColors.push(green ? '#3fae3a' : '#5a3825');
         },
       },
+      {
+        // Only offered while exactly one keeper is down — the survivor's pot
+        // pays the price (same ladder as Buy Hat), and the ghost returns with
+        // 3 hats. The price ratchets up just like Buy Hat does.
+        id: 'resurrect',
+        title: 'Resurrect Partner',
+        available() {
+          if (!multiplayer || !player2.active) return false;
+          const onlyOne = (player.ghost && !player2.ghost) || (!player.ghost && player2.ghost);
+          if (!onlyOne) return false;
+          return survivorWallet().read() >= hatPrice;
+        },
+        desc() {
+          const who = player.ghost ? 'You' : 'Partner';
+          return 'Spend $' + hatPrice + ' → ' + who + ' rises with 3 hats';
+        },
+        apply() {
+          const wallet = survivorWallet();
+          wallet.spend(hatPrice);
+          hatPrice += 2; // each resurrection makes the next one steeper, mirrors Buy Hat
+          hatsBought++;
+          if (player.ghost) reviveKeeper(player);
+          else              reviveKeeper(player2);
+        },
+      },
     ];
   }
 
@@ -1660,32 +1930,130 @@
       toast('The land has expanded!', 2);
     }
     upgradeMode = true;
-    upgradePicked = false;
-    const availableUpgrades = shuffle(getUpgradePool().filter(option => {
-      // Once Wolf's Blade is taken, gun/reload upgrades stop being offered.
-      if (upgradeLevels.sword >= 1 && GUN_UPGRADES.has(option.id)) return false;
-      return !option.available || option.available();
-    }));
-    const picks = availableUpgrades.slice(0, 3);
-    while (picks.length < 3) picks.push(makeCashOption());
-    upgradeOptions = picks;
+    // A ghost keeper skips their own pick — they have no gun to upgrade. The
+    // alive partner picks normally (and can still pick Resurrect from the
+    // host's pool to bring the ghost back).
+    upgradePicked = !!player.ghost;
+    if (upgradePicked) {
+      upgradeOptions = [];
+    } else {
+      const availableUpgrades = shuffle(getUpgradePool().filter(option => {
+        // Once Wolf's Blade is taken, gun/reload upgrades stop being offered.
+        if (upgradeLevels.sword >= 1 && GUN_UPGRADES.has(option.id)) return false;
+        return !option.available || option.available();
+      }));
+      // If a resurrection is in reach, always surface it — pull it to the front.
+      const resIdx = availableUpgrades.findIndex(o => o.id === 'resurrect');
+      if (resIdx > 0) {
+        const r = availableUpgrades.splice(resIdx, 1)[0];
+        availableUpgrades.unshift(r);
+      }
+      const picks = availableUpgrades.slice(0, 3);
+      while (picks.length < 3) picks.push(makeCashOption());
+      upgradeOptions = picks;
+    }
+    // Individual-upgrades mode: also generate a parallel pool for player2.
+    if (multiplayer && isHost && gameOpts.individualUpgrades) {
+      upgradePicked2 = !!player2.ghost; // dead partner skips their pick too
+      if (upgradePicked2) {
+        upgradeOptions2 = [];
+      } else {
+        const p2Avail = shuffle(getP2UpgradePool().filter(o => !o.available || o.available()));
+        const picks2 = p2Avail.slice(0, 3);
+        while (picks2.length < 3) picks2.push(makeP2CashOption());
+        upgradeOptions2 = picks2;
+      }
+    } else {
+      // Otherwise the partner just spectates the host's pick.
+      upgradeOptions2 = [];
+      upgradePicked2 = true;
+    }
+    // If everyone is already done (e.g. host ghost in shared mode with no
+    // partner pick), close the phase straight away.
+    maybeFinishUpgradePhase();
   }
 
   function finishUpgradePhase() {
     upgradeMode = false;
     upgradeOptions = [];
+    upgradeOptions2 = [];
+    upgradePicked2 = false;
     waveTimer = 6;
+  }
+  // Build a P2-only pool of personal gun/movement upgrades whose `apply()`
+  // pokes upgradeLevels2 instead of upgradeLevels. Mirrors the subset of the
+  // main pool that affects only the keeper firing the gun.
+  function getP2UpgradePool() {
+    const l = upgradeLevels2;
+    return [
+      { id: 'jam', title: 'Better Springs', available: () => l.jam < MAX_LEVEL,
+        desc: () => 'Jam chance → ' + Math.round(SKILL_TABLES.jam[Math.min(l.jam+1, MAX_LEVEL)] * 100) + '%',
+        apply: () => { l.jam++; } },
+      { id: 'range', title: 'Longer Barrel', available: () => l.range < MAX_LEVEL,
+        desc: () => 'Shotgun range → ' + SKILL_TABLES.range[Math.min(l.range+1, MAX_LEVEL)].toFixed(2) + 's',
+        apply: () => { l.range++; } },
+      { id: 'speed', title: 'Fast Boots', available: () => l.speed < MAX_LEVEL,
+        desc: () => 'Move speed → ' + SKILL_TABLES.speed[Math.min(l.speed+1, MAX_LEVEL)].toFixed(1),
+        apply: () => { l.speed++; player2.speed = SKILL_TABLES.speed[Math.min(l.speed, MAX_LEVEL)]; } },
+      { id: 'fireRate', title: 'Trigger Work', available: () => l.fireRate < MAX_LEVEL,
+        desc: () => 'Fire cooldown → ' + SKILL_TABLES.fireRate[Math.min(l.fireRate+1, MAX_LEVEL)].toFixed(2) + 's',
+        apply: () => { l.fireRate++; } },
+      { id: 'spreadUp', title: 'Loose Pattern',
+        available: () => l.spreadDown === 0 && l.spreadUp < MAX_LEVEL,
+        desc: () => 'Spread → ' + LOOSE_SPREAD[Math.min(l.spreadUp+1, MAX_LEVEL)] + '°, ' + LOOSE_BULLETS[Math.min(l.spreadUp+1, MAX_LEVEL)] + ' pellets',
+        apply: () => { l.spreadUp++; } },
+      { id: 'spreadDown', title: 'Tighter Pattern',
+        available: () => l.spreadUp === 0 && l.spreadDown < MAX_LEVEL,
+        desc: () => l.spreadDown+1 >= MAX_LEVEL ? 'MAX: slug, pierces 10 wolves' : 'Spread → ' + TIGHT_SPREAD[Math.min(l.spreadDown+1, MAX_LEVEL)] + '°',
+        apply: () => { l.spreadDown++; } },
+      { id: 'doubleBarrel', title: 'Double-Barrel',
+        available: () => wave >= 15 && l.machineGun === 0 && l.doubleBarrel < 5,
+        desc: () => l.doubleBarrel === 0 ? 'Right-click double-shot' : 'Double-shot jam → ' + Math.round(SKILL_TABLES.doubleBarrel[Math.min(l.doubleBarrel+1, 5)] * 100) + '%',
+        apply: () => { l.doubleBarrel++; } },
+      { id: 'machineGun', title: 'Machine-Gun',
+        available: () => wave >= 15 && l.doubleBarrel === 0 && l.machineGun < 5,
+        desc: () => l.machineGun === 0 ? 'Rapid auto-fire, slow reload' : 'Magazine → ' + SKILL_TABLES.machineGun[Math.min(l.machineGun+1, 5)],
+        apply: () => { l.machineGun++; player2.ammo = SKILL_TABLES.machineGun[Math.min(l.machineGun, 5)]; } },
+      { id: 'reloadMove', title: 'Reload Movement',
+        available: () => wave >= 15 && l.reloadMove < MAX_LEVEL,
+        desc: () => 'Reload slowdown → ' + Math.round(SKILL_TABLES.reloadMove[Math.min(l.reloadMove+1, MAX_LEVEL)] * 100) + '%',
+        apply: () => { l.reloadMove++; } },
+      { id: 'sprint', title: 'Stampede', available: () => wave >= 30 && l.sprint < 5,
+        desc: () => '+' + Math.round(SKILL_TABLES.sprint[Math.min(l.sprint+1, 5)] * 100) + '% sprint',
+        apply: () => { l.sprint++; } },
+      { id: 'softBullet', title: 'Soft Bullets',
+        available: () => wave >= 30 && l.hardBullet === 0 && l.softBullet < 5,
+        desc: () => 'Spare chicken → ' + Math.round(SKILL_TABLES.softBullet[Math.min(l.softBullet+1, 5)] * 100) + '%',
+        apply: () => { l.softBullet++; } },
+      { id: 'hardBullet', title: 'Hard Bullets',
+        available: () => wave >= 30 && l.softBullet === 0 && l.hardBullet < 5,
+        desc: () => 'Pellet damage +' + Math.round((SKILL_TABLES.hardBullet[Math.min(l.hardBullet+1, 5)] - 1) * 100) + '%',
+        apply: () => { l.hardBullet++; } },
+      { id: 'rust', title: 'Rusty Springs', available: () => wave >= 30 && l.rust < 5,
+        desc: () => 'Jam +' + Math.round(SKILL_TABLES.rust[Math.min(l.rust+1, 5)] * 100) + '%, golden at MAX',
+        apply: () => { l.rust++; } },
+      { id: 'spinReload', title: 'Gun Twirl', available: () => wave >= 30 && l.spinReload < 5,
+        desc: () => Math.round(SKILL_TABLES.spinReload[Math.min(l.spinReload+1, 5)] * 100) + '% twirl reload',
+        apply: () => { l.spinReload++; } },
+    ];
+  }
+  function makeP2CashOption() {
+    const r = Math.max(1, Math.floor(wave / 3));
+    return {
+      id: 'cash', title: 'Cash',
+      desc: () => 'Pick up $' + r,
+      apply: () => { addMoney(player2, r); },
+    };
   }
 
   function selectUpgrade(index) {
     if (multiplayer && !isHost) return; // host picks; guest only watches
+    if (player.ghost) return; // ghosts sit out the upgrade phase
     if (!upgradeMode || upgradePicked) return;
     const option = upgradeOptions[index];
     if (!option) return;
     option.apply();
     upgradePicked = true;
-    upgradeMode = false;
-    upgradeOptions = [];
     toast(option.id === 'cash' ? 'Picked up $10'
         : option.id === 'buyHat' ? 'Bought a hat!  -$20'
         : option.id === 'dog' ? (
@@ -1693,7 +2061,54 @@
             : upgradeLevels.dog === 1 ? (dogGen + (dogGen === 1 ? ' dog joins you!' : ' dogs join you!'))
             : 'Dog pack trained')
         : option.title + ' upgraded');
+    maybeFinishUpgradePhase();
+  }
+
+  // Both players must have picked in individual-upgrades mode before the next
+  // wave begins. In any other mode only the host's pick matters.
+  function maybeFinishUpgradePhase() {
+    const needP2 = multiplayer && isHost && gameOpts.individualUpgrades;
+    if (!upgradePicked) return;
+    if (needP2 && !upgradePicked2) return;
+    upgradeMode = false;
+    upgradeOptions = [];
+    upgradeOptions2 = [];
     waveTimer = 6;
+  }
+
+  // Host-side handler: the guest forwarded its upgrade pick.
+  function selectUpgradeP2OnHost(index) {
+    if (!multiplayer || !isHost) return;
+    if (!gameOpts.individualUpgrades) return;
+    if (player2.ghost) return; // ghost sits out
+    if (upgradePicked2) return;
+    const option = upgradeOptions2[index];
+    if (!option) return;
+    option.apply();
+    upgradePicked2 = true;
+    toast('Partner picked ' + option.title, 1.4);
+    maybeFinishUpgradePhase();
+  }
+
+  // Guest-side click on a P2 upgrade card.
+  function selectUpgradeP2(index) {
+    if (!multiplayer || isHost) return;
+    if (!gameOpts.individualUpgrades) return;
+    if (player.ghost) return; // ghost guest doesn't pick
+    if (upgradePicked2) return;
+    sendP2Input('upgrade', { index });
+    upgradePicked2 = true; // optimistic — host's snapshot will confirm
+  }
+  function selectUpgradeP2At(x, y) {
+    const rects = getUpgradeOptionRects();
+    for (let i = 0; i < rects.length; i++) {
+      const r = rects[i];
+      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+        selectUpgradeP2(i);
+        return true;
+      }
+    }
+    return false;
   }
 
   function selectUpgradeAt(x, y) {
@@ -1742,11 +2157,14 @@
     return null;
   }
 
-  function getBuildTarget() {
-    const type = BUILD_TYPES[buildType];
+  function getBuildTarget(builder) {
+    builder = builder || player;
+    // builder.buildType is kept in sync with the legacy `buildType` global
+    // for player1 via syncP1Weapon, and is the authoritative source for P2.
+    const type = BUILD_TYPES[builder.buildType || 0];
     const range = type === 'coop' ? COOP_PLACE_RANGE : 1.8;
-    const x = Math.round(player.x + Math.cos(player.dir) * range);
-    const y = Math.round(player.y + Math.sin(player.dir) * range);
+    const x = Math.round(builder.x + Math.cos(builder.dir) * range);
+    const y = Math.round(builder.y + Math.sin(builder.dir) * range);
     let valid = inBounds(x, y);
     let reason = valid ? '' : 'Out of bounds';
     if (type === 'remove') {
@@ -1802,82 +2220,123 @@
   }
 
   // Toast describing the currently selected building.
-  function buildModeToast() {
-    const type = BUILD_TYPES[buildType];
-    if (type === 'remove') return 'Remove / sell building — scroll to switch, E to remove';
+  function buildModeToast(builder) {
+    builder = builder || player;
+    const type = BUILD_TYPES[builder.buildType || 0];
+    const prefix = (builder === player2) ? 'P2 ' : '';
+    if (type === 'remove') return prefix + 'Remove / sell building — scroll to switch, E to remove';
     let label;
     if (type === 'coop') label = 'Coop ($' + coopCost() + ')';
     else if (type === 'farm') label = 'Farm ($' + farmCost() + ')' + (upgradeLevels.farm >= 1 ? '' : ' — LOCKED');
     else if (type === 'stonefence') label = 'Stone Wall ($' + STONE_FENCE_COST + ')' + (upgradeLevels.stoneWall > 0 ? '' : ' — LOCKED');
     else label = 'Wooden Fence ($' + FENCE_COST + ')' + (upgradeLevels.woodFence > 0 ? '' : ' — LOCKED');
-    return 'Build: ' + label + ' — scroll to switch, E to place';
+    return prefix + 'Build: ' + label + ' — scroll to switch, E to place';
   }
 
-  function placeBuilding() {
-    if (multiplayer && !isHost) { toast('Only the host can build', 1.2); buildMode = false; return; }
-    const t = BUILD_TYPES[buildType];
-    if (t === 'fence') placeFence('wood');
-    else if (t === 'stonefence') placeFence('stone');
-    else if (t === 'farm') placeFarm();
-    else if (t === 'remove') removeBuilding();
-    else placeCoop();
+  function placeBuilding(builder) {
+    builder = builder || player;
+    // Host-only authoritative placement. The guest gets here for player1 in
+    // single-player; for MP the guest's E press routes to the host as a
+    // p2input message instead of calling this directly.
+    if (multiplayer && !isHost && builder === player) {
+      toast('Sending build to host…', 0.8); buildMode = false; return;
+    }
+    const t = BUILD_TYPES[builder.buildType || 0];
+    if (t === 'fence') placeFence('wood', builder);
+    else if (t === 'stonefence') placeFence('stone', builder);
+    else if (t === 'farm') placeFarm(builder);
+    else if (t === 'remove') removeBuilding(builder);
+    else placeCoop(builder);
   }
 
-  function placeFarm() {
+  // Host-only — invoked when the guest presses E. Either enters build mode
+  // for player2 (picking the first unlocked build type) or places the
+  // currently-targeted building.
+  function p2BuildToggle() {
+    if (gameOver || upgradeMode) return;
+    if (player2.ghost) { toast('Partner is a ghost — they can\'t build', 1.2); return; }
+    if (player2.buildMode) {
+      placeBuilding(player2);
+    } else {
+      player2.buildMode = true;
+      for (let i = 0; i < BUILD_TYPES.length; i++) {
+        const t = BUILD_TYPES[i];
+        if (t === 'fence' && upgradeLevels.woodFence <= 0) continue;
+        if (t === 'stonefence' && upgradeLevels.stoneWall <= 0) continue;
+        if (t === 'farm' && upgradeLevels.farm < 1) continue;
+        player2.buildType = i; break;
+      }
+      toast(buildModeToast(player2));
+    }
+  }
+  function p2BuildScroll(dir) {
+    if (!player2.buildMode) return;
+    let attempts = 0;
+    let idx = player2.buildType;
+    while (attempts < BUILD_TYPES.length) {
+      idx = (idx + dir + BUILD_TYPES.length) % BUILD_TYPES.length;
+      const t = BUILD_TYPES[idx];
+      if (t === 'fence' && upgradeLevels.woodFence <= 0) { attempts++; continue; }
+      if (t === 'stonefence' && upgradeLevels.stoneWall <= 0) { attempts++; continue; }
+      if (t === 'farm' && upgradeLevels.farm < 1) { attempts++; continue; }
+      player2.buildType = idx; break;
+    }
+    toast(buildModeToast(player2));
+  }
+
+  function placeFarm(builder) {
+    builder = builder || player;
     const cost = farmCost();
-    if (money < cost) { toast('Need $' + cost + ' to start a farm'); return; }
-    const target = getBuildTarget();
+    if (moneyOf(builder) < cost) { toast('Need $' + cost + ' to start a farm'); return; }
+    const target = getBuildTarget(builder);
     if (!target.valid) { toast(target.reason); return; }
-    // Starts growing on its own the moment it's placed; no planting needed.
-    // `need` is the stage count it must reach to harvest — locked in now so a
-    // later Farm upgrade can't make this plot pay before it visually ripens.
     farms.push({ x: target.x, y: target.y, growth: 0, trampleFlash: 0, need: wavesToFinish() });
-    money -= cost;
+    spendMoney(builder, cost);
     playBuild();
     toast('Farm started!  -$' + cost, 1.2);
-    // Stay in build mode so several farms can be laid down.
   }
 
-  function removeBuilding() {
-    const target = getBuildTarget();
+  function removeBuilding(builder) {
+    builder = builder || player;
+    const target = getBuildTarget(builder);
     if (!target.valid || !target.removeTarget) { toast(target.reason || 'Nothing to remove'); return; }
     const b = target.removeTarget;
     b.array.splice(b.index, 1);
-    money += b.refund;
+    // Refunds always go to whoever pulled the building down.
+    if (b.refund > 0) addMoney(builder, b.refund);
     playBuild();
     toast(b.label + ' removed' + (b.refund > 0 ? '  +$' + b.refund : '  (no refund)'), 1.0);
-    // Stay in build mode so several can be cleared in a row.
   }
 
-  function placeFence(kind) {
-    const target = getBuildTarget();
+  function placeFence(kind, builder) {
+    builder = builder || player;
+    const target = getBuildTarget(builder);
     if (!target.valid) { toast(target.reason); return; }
     const cost = kind === 'stone' ? STONE_FENCE_COST : FENCE_COST;
     const name = kind === 'stone' ? 'Stone wall' : 'Fence';
-    if (money < cost) { toast('Need $' + cost + ' to build ' + name.toLowerCase()); return; }
-    // HP comes from the Wooden Fence / Stone Wall upgrade level.
+    if (moneyOf(builder) < cost) { toast('Need $' + cost + ' to build ' + name.toLowerCase()); return; }
     const hp = kind === 'stone' ? tableAt('stoneWall') : tableAt('woodFence');
     fences.push({ x: target.x, y: target.y, kind: kind, hp: hp, hurtT: 0 });
-    money -= cost;
+    spendMoney(builder, cost);
     playBuild();
     toast(name + ' placed!  -$' + cost, 0.8);
-    // Stay in build mode so a row of fences can be laid down quickly.
   }
 
-  function placeCoop() {
+  function placeCoop(builder) {
+    builder = builder || player;
     const cost = coopCost();
-    if (money < cost) { toast('Need $' + cost + ' to build coop'); return; }
-    const target = getBuildTarget();
+    if (moneyOf(builder) < cost) { toast('Need $' + cost + ' to build coop'); return; }
+    const target = getBuildTarget(builder);
     if (!target.valid) { toast(target.reason); return; }
-    // builtWave/level drive the coop's floor-stacking as it ages (see startWave()).
     coops.push({ x: target.x, y: target.y, spawnT: 3, hp: 3, builtWave: wave, level: 0, dirtR: 0 });
-    money -= cost;
+    spendMoney(builder, cost);
     playBuild();
     toast('Coop placed!  -$' + cost);
-    buildMode = false;
+    // Coops close out the builder's build mode (you only need one at a time).
+    if (builder === player2) player2.buildMode = false;
+    else                     buildMode = false;
     coopsPlaced++;
     if (coopsPlaced % 10 === 0) {
-      // Defer the actual growth to the upgrade screen so it isn't abrupt.
       pendingMapExpansions++;
       toast('10 coops built! The land will expand at the next upgrade', 2.6);
     }
@@ -2173,30 +2632,45 @@
       grossReward += 1 + fatTierOf(c) * FAT_GOLD_PER_TIER;
     }
     const penaltyMul = Math.pow(2, Math.floor(wave / 10));
-    const penalty = chickensKilledByPlayer * penaltyMul;
+    // Each keeper's friendly-fire kills are tracked separately now, so the
+    // shared chicken-kill tally is just their sum.
+    const totalShot = chickensKilledByPlayer + (player2.chickensKilledThisWave || 0);
+    const penalty = totalShot * penaltyMul;
     const reward = Math.max(0, grossReward - penalty);
     // Farms grow one step per defended wave; ripe ones pay into this payout.
     const farmGold = growFarms(1);
     const farmNote = farmGold > 0 ? '  +$' + farmGold + ' farms' : '';
-    money += reward + farmGold;
+    // In separate-money mode the wave payout splits 50/50 across both keepers;
+    // otherwise the legacy single-pot behaviour stays intact.
+    addSharedMoney(reward + farmGold);
     if (reward > 0) {
-      const note = penalty > 0 ? '  (-$' + penalty + ' for ' + chickensKilledByPlayer + ' shot' + (chickensKilledByPlayer > 1 ? 's' : '') + ')' : '';
+      const note = penalty > 0 ? '  (-$' + penalty + ' for ' + totalShot + ' shot' + (totalShot > 1 ? 's' : '') + ')' : '';
       toast('Wave ' + wave + ' defended!  +$' + reward + ' (' + aliveChickens + ' chickens)' + note + farmNote, 2.2);
     } else if (penalty > 0) {
-      toast('Wave ' + wave + ' defended! Payout lost — you shot ' + chickensKilledByPlayer + ' chicken' + (chickensKilledByPlayer > 1 ? 's' : '') + farmNote, 2.2);
+      toast('Wave ' + wave + ' defended! Payout lost — ' + totalShot + ' chicken' + (totalShot > 1 ? 's' : '') + ' shot' + farmNote, 2.2);
     } else if (farmGold > 0) {
       toast('Wave ' + wave + ' defended!' + farmNote, 2.2);
     } else {
       toast('Wave ' + wave + ' defended! No chickens — no income', 2.2);
     }
-    // Karma drifts one step per wave: a clean wave (no chicken shot) nudges it
-    // toward good, a wave with a friendly-fire kill nudges it toward bad.
+    // Per-player karma drift — each keeper's tint reacts to their own kills,
+    // not the partner's. The legacy `karma` global mirrors player1's so older
+    // call sites (Karma Resurrect, debug buttons) keep working.
     if (chickensKilledByPlayer > 0) {
-      karma = Math.max(-KARMA_MAX, karma - 1);
+      player.karma = Math.max(-KARMA_MAX, player.karma - 1);
     } else {
-      karma = Math.min(KARMA_MAX, karma + 1);
+      player.karma = Math.min(KARMA_MAX, player.karma + 1);
     }
-    chickensKilledByPlayer = 0; // reset the friendly-fire tally for the next round
+    karma = player.karma;
+    if (player2.active) {
+      if ((player2.chickensKilledThisWave || 0) > 0) {
+        player2.karma = Math.max(-KARMA_MAX, player2.karma - 1);
+      } else {
+        player2.karma = Math.min(KARMA_MAX, player2.karma + 1);
+      }
+    }
+    chickensKilledByPlayer = 0;
+    player2.chickensKilledThisWave = 0;
     upgradeDelayT = 2; // game keeps running for 2s after the wave before the upgrade window opens
   }
 
@@ -2244,6 +2718,7 @@
         r: pelletR,
         color: pelletColor,
         trail: !isSlug,
+        shooter: 1,
       });
     }
     shake = 0.15;
@@ -2317,6 +2792,7 @@
   function magDump() {
     if (multiplayer && !isHost) return;
     if (gameOver || buildMode || upgradeMode) return;
+    if (player.ghost) return;
     if (reloadingT > 0 || magDumpLeft > 0) return;
     if (ammo <= 0) { startMGReload(); return; }
     magDumpLeft = ammo; // every loaded round fires — cannot be cancelled
@@ -2350,6 +2826,7 @@
   function tryShoot() {
     if (multiplayer && !isHost) return; // guest can't shoot yet (host is authoritative)
     if (gameOver) return;
+    if (player.ghost) return; // ghosts wander without weapons
     if (magDumpLeft > 0) return; // locked out mid mag-dump
     if (buildMode) {
       buildMode = false;
@@ -2408,6 +2885,7 @@
   function doubleShot() {
     if (multiplayer && !isHost) return;
     if (gameOver || buildMode || upgradeMode) return;
+    if (player.ghost) return;
     if (player.reloadT > 0 || reloadingT > 0) return;
     if (!chambered) { tryReload(); return; }
     chambered = false;
@@ -2473,6 +2951,247 @@
   function aimAngle() {
     const w = screenToWorld(mouse.x, mouse.y);
     return Math.atan2(w.y - player.y, w.x - player.x);
+  }
+
+  // ---------- Player 2 shooting (host-authoritative) ----------
+  // Host runs these whenever the guest forwards a shoot/reload input.
+  // All state lives on the player2 object so the two keepers can fire
+  // independently. Visual + audio happen on the host as usual; the snapshot
+  // ships player2's weapon timers down so the guest sees its own gun.
+  function fireBurstP2(dmgMul = 1) {
+    playShotgun();
+    player2.runT = 0;
+    const lvls = lvlsFor(player2);
+    const isSlug = lvls.spreadDown >= MAX_LEVEL;
+    const loose = lvls.spreadUp > 0;
+    const tighter = lvls.spreadDown > 0;
+    let pelletDmg = isSlug ? (5 + lvls.spreadDown2 * 2) : loose ? 0.7 : tighter ? 1.3 : 1;
+    const pelletR  = isSlug ? 3.5 : loose ? 1.3 : 2;
+    const spareChance = lvls.softBullet > 0 ? tableAtFor(player2, 'softBullet') : 0;
+    if (lvls.hardBullet > 0) pelletDmg *= tableAtFor(player2, 'hardBullet');
+    if (player2.spinDmg) { pelletDmg *= 2; player2.spinDmg = false; }
+    pelletDmg *= dmgMul;
+    let pelletColor = isSlug ? '#ffe680' : '#fff3a0';
+    if (isSlug && lvls.spreadDown2 >= 5) pelletColor = '#ffaa3a';
+    else if (loose && lvls.spreadUp2 >= 5) pelletColor = '#ffaa3a';
+    if (lvls.softBullet >= 5)      pelletColor = '#7ec7ff';
+    else if (lvls.hardBullet >= 5) pelletColor = '#ff6a6a';
+    const aim = player2.dir;
+    const speed = 18;
+    const ss = spreadStatsFor(player2);
+    const life = shotgunLifeFor(player2);
+    for (let i = 0; i < ss.count; i++) {
+      const t = ss.count > 1 ? (i / (ss.count - 1)) * 2 - 1 : 0;
+      const jitter = rand(-ss.spread, ss.spread) * 0.12;
+      const a = aim + t * ss.spread + jitter;
+      const sp = speed + rand(-2, 2);
+      pellets.push({
+        x: player2.x + Math.cos(a) * 0.3,
+        y: player2.y + Math.sin(a) * 0.3,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp,
+        life: life,
+        dmg: pelletDmg,
+        pierce: isSlug ? (10 + lvls.spreadDown2 * 3) : 1,
+        hit: isSlug ? new Set() : null,
+        spareChance: spareChance,
+        r: pelletR,
+        color: pelletColor,
+        trail: !isSlug,
+        shooter: 2, // tags this pellet as player2's (drives friendly-fire checks)
+      });
+    }
+    shake = 0.15;
+  }
+
+  function knockbackPlayer2(dist) {
+    const nx = player2.x - Math.cos(player2.dir) * dist;
+    const ny = player2.y - Math.sin(player2.dir) * dist;
+    if (!fenceBlocks(nx, player2.y)) player2.x = nx;
+    if (!fenceBlocks(player2.x, ny)) player2.y = ny;
+    player2.x = clamp(player2.x, -HALF_MAP + 1, HALF_MAP - 1);
+    player2.y = clamp(player2.y, -HALF_MAP + 1, HALF_MAP - 1);
+  }
+
+  function startMGReloadP2() {
+    playReload();
+    const spinChance = tableAtFor(player2, 'spinReload');
+    if (Math.random() < spinChance) {
+      player2.reloadingT = SPIN_RELOAD_TIME;
+      player2.spinT = SPIN_RELOAD_TIME;
+      if (lvlsFor(player2).spinReload >= 5) {
+        player2.spinDmg = true;
+        toast('P2 gun twirl!  Double damage', 0.9);
+      } else {
+        toast('P2 gun twirl!', 0.7);
+      }
+    } else {
+      player2.reloadingT = MG_RELOAD;
+    }
+  }
+
+  function handleJamP2() {
+    player2.reloadingT = 0.6;
+    player2.jamT = 0.5;
+    playReloadJam();
+    const lvls = lvlsFor(player2);
+    if (lvls.rust >= 5) {
+      if (player2.jamStreak >= GOLD_JAM_GRACE) {
+        const payout = GOLD_PER_JAM * Math.pow(2, Math.min(player2.jamStreak - GOLD_JAM_GRACE, GOLD_STREAK_CAP));
+        addMoney(player2, payout);
+        playMoney();
+        toast('P2 jackpot!  +$' + payout, 1.1);
+      } else {
+        toast('P2 jammed!  (' + (GOLD_JAM_GRACE - player2.jamStreak) + ' to golden)', 0.9);
+      }
+      player2.jamStreak++;
+    } else {
+      toast('P2 jammed!', 0.8);
+    }
+  }
+
+  function swordSwingP2() {
+    player2.reloadT = SWORD_COOLDOWN;
+    player2.meleeT = MELEE_ANIM_DUR;
+    player2.meleeDir = player2.dir;
+    player2.meleeFull = false;
+    player2.runT = 0;
+    playSwordSwing();
+    shake = Math.max(shake, 0.18);
+    const r2 = SWORD_RANGE * SWORD_RANGE;
+    for (const w of wolves) {
+      if (!w.alive) continue;
+      const dx = w.x - player2.x, dy = w.y - player2.y;
+      if (dx * dx + dy * dy > r2) continue;
+      let diff = Math.abs(Math.atan2(dy, dx) - player2.dir);
+      if (diff > Math.PI) diff = Math.PI * 2 - diff;
+      if (diff > SWORD_ARC) continue;
+      const m = Math.hypot(dx, dy) || 1;
+      hurtWolf(w, SWORD_DMG, (dx / m) * 0.4, (dy / m) * 0.4, player2);
+    }
+  }
+
+  function tryShootP2() {
+    if (gameOver) return;
+    if (player2.ghost) return;
+    if (player2.buildMode) {
+      // Pressing left-click while in build mode cancels it (parity with P1).
+      player2.buildMode = false;
+      toast('P2 build mode cancelled', 1.0);
+      return;
+    }
+    if (player2.magDumpLeft > 0) return;
+    const lvls = lvlsFor(player2);
+    if (lvls.sword >= 1) {
+      if (player2.reloadT <= 0) swordSwingP2();
+      return;
+    }
+    if (player2.reloadT > 0) return;
+    if (player2.reloadingT > 0) return;
+    if (lvls.machineGun > 0) {
+      if (player2.ammo <= 0) { startMGReloadP2(); return; }
+      fireBurstP2();
+      player2.ammo--;
+      player2.reloadT = 0.12;
+      if (player2.ammo <= 0) startMGReloadP2();
+      return;
+    }
+    if (!player2.chambered) { tryReloadP2(); return; }
+    player2.chambered = false;
+    player2.reloadT = shotgunCooldownFor(player2);
+    fireBurstP2();
+  }
+
+  function doubleShotP2() {
+    if (gameOver || player2.ghost) return;
+    if (player2.buildMode) return;
+    if (player2.reloadT > 0 || player2.reloadingT > 0) return;
+    if (!player2.chambered) { tryReloadP2(); return; }
+    player2.chambered = false;
+    player2.reloadT = shotgunCooldownFor(player2) * 1.3;
+    fireBurstP2(2);
+    fireBurstP2(2);
+    shake = 0.3;
+    knockbackPlayer2(1.4);
+    spawnSmoke(player2.x + Math.cos(player2.dir) * 0.6, player2.y + Math.sin(player2.dir) * 0.6, 6);
+    const fr2 = DBL_FRONT_R * DBL_FRONT_R;
+    for (const w of wolves) {
+      if (!w.alive) continue;
+      const dx = w.x - player2.x, dy = w.y - player2.y;
+      if (dx * dx + dy * dy > fr2) continue;
+      let diff = Math.abs(Math.atan2(dy, dx) - player2.dir);
+      if (diff > Math.PI) diff = Math.PI * 2 - diff;
+      if (diff > 1.3) continue;
+      const m = Math.hypot(dx, dy) || 1;
+      hurtWolf(w, DBL_FRONT_DMG, (dx / m) * 0.2, (dy / m) * 0.2, player2);
+    }
+    if (Math.random() < tableAtFor(player2, 'doubleBarrel')) handleJamP2();
+  }
+
+  function magDumpP2() {
+    if (gameOver || player2.ghost) return;
+    if (player2.buildMode) return;
+    if (player2.reloadingT > 0 || player2.magDumpLeft > 0) return;
+    if (player2.ammo <= 0) { startMGReloadP2(); return; }
+    player2.magDumpLeft = player2.ammo;
+    player2.magDumpT = 0;
+  }
+
+  function tryReloadP2() {
+    if (gameOver || player2.ghost) return;
+    const lvls = lvlsFor(player2);
+    if (lvls.sword >= 1) return;
+    if (player2.reloadingT > 0) return;
+    if (lvls.machineGun > 0) {
+      if (player2.ammo < tableAtFor(player2, 'machineGun')) startMGReloadP2();
+      return;
+    }
+    if (player2.chambered) { toast('P2 already loaded', 0.5); return; }
+    if (Math.random() < jamChanceFor(player2)) { handleJamP2(); return; }
+    player2.chambered = true;
+    player2.jamStreak = 0;
+    playReload();
+    if (Math.random() < tableAtFor(player2, 'spinReload')) {
+      player2.reloadingT = SPIN_RELOAD_TIME;
+      player2.spinT = SPIN_RELOAD_TIME;
+      if (lvls.spinReload >= 5) {
+        player2.spinDmg = true;
+        toast('P2 gun twirl!  Double damage', 0.9);
+      } else {
+        toast('P2 gun twirl!', 0.7);
+      }
+    } else {
+      player2.reloadingT = 1.0;
+    }
+  }
+
+  // Friendly-fire pellet hit — knocks a hat off the other keeper. Mirrors the
+  // wolf-bites-keeper bookkeeping so death/ghost transitions still trigger.
+  // A short debounce window keeps a single shotgun blast (multiple pellets
+  // landing on the same frame) from removing more than one hat.
+  function applyFriendlyFireHit(target) {
+    if (target.ghost) return;
+    if (target.bulletHitT > 0) return; // already debited by an earlier pellet this blast
+    target.bulletHitT = 0.18;          // ~one blast window
+    shake = Math.max(shake, 0.18);
+    target.hurtT = 0.22;
+    if (target === player) {
+      if (immortal && playerHats <= 1) { toast('Immortal — last hat held!', 0.9); return; }
+      playerHats--;
+      hatColors.pop();
+      if (playerHats <= 0) {
+        if (!tryKarmaResurrect()) killKeeper(player, 'host', 'friendly fire');
+      } else {
+        toast('Friendly fire! ' + playerHats + ' hats left', 1.2);
+      }
+    } else if (target === player2) {
+      player2.hats--;
+      if (player2.hats <= 0) {
+        killKeeper(player2, 'guest', 'friendly fire');
+      } else {
+        toast('Friendly fire hit partner! ' + player2.hats + ' hats left', 1.2);
+      }
+    }
   }
 
   // ---------- AI ----------
@@ -2860,7 +3579,7 @@
           w.attackT = 0.7;
           // Sword wolves swing their blade — kick off the white melee arc.
           if (w.sword) { w.meleeT = MELEE_ANIM_DUR; w.meleeDir = Math.atan2(dy, dx); }
-          if (target === player) {
+          if (target === player && !player.ghost) {
             shake = 0.25;
             player.hurtT = 0.22;
             if (immortal && playerHats <= 1) {
@@ -2869,11 +3588,7 @@
               playerHats--;
               hatColors.pop();
               if (playerHats <= 0) {
-                if (!tryKarmaResurrect()) {
-                  gameOver = true;
-                  gameOverCause = 'host';
-                  gameOverMsg = 'A wolf knocked off your last hat! Press Q for menu or F5 to restart.';
-                }
+                if (!tryKarmaResurrect()) killKeeper(player, 'host', 'wolf');
               } else {
                 toast('A wolf knocked off a hat! ' + playerHats + ' left', 1.2);
               }
@@ -2885,11 +3600,7 @@
             player2.hurtT = 0.22;
             player2.hats--;
             if (player2.hats <= 0) {
-              // Guest doesn't game-over — they become an immortal ghost
-              // that wolves ignore. Only the host's death ends the run.
-              player2.hats = 0;
-              player2.ghost = true;
-              toast('Partner fell — wandering as a ghost!', 2.6);
+              killKeeper(player2, 'guest', 'wolf');
             } else {
               toast('Partner got hit! ' + player2.hats + ' hats left', 1.2);
             }
@@ -3038,19 +3749,22 @@
   }
 
   // Apply damage to a wolf/fox outside the pellet path (used by the melee
-  // counter) — mirrors the pellet kill bookkeeping.
-  function hurtWolf(w, dmg, kx, ky) {
+  // counter) — mirrors the pellet kill bookkeeping. `attacker` (default
+  // player1) gets credit for the kill on the per-player scoreboard.
+  function hurtWolf(w, dmg, kx, ky, attacker) {
     if (!w.alive) return;
+    attacker = attacker || player;
     w.hp -= dmg;
     w.hurtT = 0.12;
     if (w.hp <= 0) {
       w.alive = false;
       kills++;
+      attacker.kills = (attacker.kills || 0) + 1;
       onWolfKilled(w);
       corpses.push({ x: w.x, y: w.y, kind: w.fox ? 'fox' : 'wolf', t: 5 });
       if (w.fox) {
         const bounty = 50 + wave;
-        money += bounty;
+        addSharedMoney(bounty);
         toast('Fox bagged! +$' + bounty, 1.8);
       }
       checkWaveDefended();
@@ -3091,6 +3805,75 @@
   // melee-max-style explosion tears through the surrounding wolves and the
   // player respawns with 7 hats: white for good karma, black for bad. The
   // karma is spent by the rescue, resetting to 0 (and so does the shirt tint).
+  // Knock a keeper down — in multiplayer they slip into ghost form and their
+  // wallet is willed to the survivor; the run only ends once BOTH are down.
+  // In single-player there's no one to inherit, so it's straight gameOver.
+  // `byWhat` records WHAT killed them ('wolf', 'friendly fire', ...) for the
+  // end-of-run scoreboard. `cause` stays as the host/guest role identifier.
+  function killKeeper(who, cause, byWhat) {
+    byWhat = byWhat || 'wolf';
+    who.deathCause = byWhat;
+    if (!multiplayer || !player2.active) {
+      // Single-player: keep the legacy gameOver flow.
+      gameOver = true;
+      gameOverCause = cause || 'host';
+      gameOverMsg = (cause === 'host')
+        ? 'A wolf knocked off your last hat! Press Q for menu or F5 to restart.'
+        : 'A wolf knocked off your last hat!';
+      return;
+    }
+    // Already a ghost? Nothing to do.
+    if (who === player && player.ghost) { checkBothDown(); return; }
+    if (who === player2 && player2.ghost) { checkBothDown(); return; }
+    if (who === player) {
+      // Host dies → ghost. Bequeath the wallet to the partner.
+      player.ghost = true;
+      player.deaths = (player.deaths || 0) + 1;
+      playerHats = 0;
+      hatColors.length = 0;
+      if (gameOpts.separateMoney) { money2 += money; money = 0; }
+      toast('You fell — wandering as a ghost! Money passed to partner.', 3.2);
+    } else if (who === player2) {
+      player2.ghost = true;
+      player2.deaths = (player2.deaths || 0) + 1;
+      player2.hats = 0;
+      if (gameOpts.separateMoney) { money += money2; money2 = 0; }
+      toast('Partner fell — wandering as a ghost! Their money is now yours.', 3.2);
+    }
+    checkBothDown();
+  }
+  function checkBothDown() {
+    if (!multiplayer || !player2.active) return;
+    if (player.ghost && player2.ghost) {
+      gameOver = true;
+      gameOverCause = 'both';
+      gameOverMsg = 'Both keepers fell! Press Q for menu or F5 to restart.';
+    }
+  }
+  // Used by the resurrect upgrade to bring a ghost back with a fresh stack.
+  function reviveKeeper(who) {
+    if (who === player && player.ghost) {
+      player.ghost = false;
+      playerHats = 3;
+      hatColors.length = 0;
+      for (let i = 0; i < 3; i++) hatColors.push('#5a3825');
+      player.hurtT = 0;
+      toast('You rose again! +3 hats', 2.6);
+    } else if (who === player2 && player2.ghost) {
+      player2.ghost = false;
+      player2.hats = 3;
+      player2.hurtT = 0;
+      toast('Partner rose again! +3 hats', 2.6);
+    }
+  }
+  // Whose wallet pays for cross-keeper purchases (e.g. resurrect) — the
+  // surviving keeper, since the ghost's money has already been transferred.
+  function survivorWallet() {
+    if (!gameOpts.separateMoney) return { read: () => money, spend: n => { money -= n; } };
+    if (player.ghost) return { read: () => money2, spend: n => { money2 -= n; } };
+    return { read: () => money, spend: n => { money -= n; } };
+  }
+
   function tryKarmaResurrect() {
     if (karma < KARMA_MAX && karma > -KARMA_MAX) return false;
     const good = karma >= KARMA_MAX;
@@ -3126,6 +3909,7 @@
       playChickenDeath();
     }
     karma = 0; // the karma is consumed by the rescue
+    player.karma = 0;
     toast(good
       ? 'Good karma saves you — every wolf vapourised, 7 hats!'
       : 'Bad karma saves you — the flock pays the price, 7 hats!', 3.2);
@@ -3133,7 +3917,23 @@
   }
 
   // The player's shirt is base blue, but karma slowly tints it: good karma
-  // lightens it toward white, bad karma darkens it toward navy.
+  // lightens it toward white, bad karma darkens it toward navy. Each keeper
+  // carries their own karma so partners read each other's mood at a glance.
+  function shirtColorOf(who) {
+    const k = (who && typeof who.karma === 'number') ? who.karma : karma;
+    const r0 = 58, g0 = 110, b0 = 165; // #3a6ea5
+    const f = Math.max(-1, Math.min(1, k / KARMA_MAX));
+    let r, g, b;
+    if (f >= 0) {
+      r = r0 + (255 - r0) * f * 0.65;
+      g = g0 + (255 - g0) * f * 0.65;
+      b = b0 + (255 - b0) * f * 0.65;
+    } else {
+      const k2 = 1 + f * 0.7;
+      r = r0 * k2; g = g0 * k2; b = b0 * k2;
+    }
+    return 'rgb(' + Math.round(r) + ',' + Math.round(g) + ',' + Math.round(b) + ')';
+  }
   function playerShirtColor() {
     const r0 = 58, g0 = 110, b0 = 165; // #3a6ea5
     const f = Math.max(-1, Math.min(1, karma / KARMA_MAX));
@@ -3189,11 +3989,15 @@
         if (w.hp <= 0) {
           w.alive = false;
           kills++;
+          // Credit the killing shooter on the per-player scoreboard.
+          const shooter = p.shooter === 2 ? player2 : player;
+          shooter.kills = (shooter.kills || 0) + 1;
           onWolfKilled(w);
           corpses.push({ x: w.x, y: w.y, kind: w.fox ? 'fox' : 'wolf', t: 5 });
           if (w.fox) {
             const bounty = 50 + wave;
-            money += bounty;
+            // Fox bounty goes to whoever fired the killing pellet.
+            addMoney(shooter, bounty);
             toast('Fox bagged! +$' + bounty, 1.8);
           }
           checkWaveDefended();
@@ -3204,6 +4008,19 @@
         }
         if (p.hit) p.hit.add(w);
         if (--p.pierce <= 0) return false;
+      }
+    }
+    // Friendly fire — pellets can knock hats off the OTHER keeper.
+    if (gameOpts.friendlyFire && player2.active) {
+      if (p.shooter !== 1 && !player.ghost &&
+          dist2(p.x, p.y, player.x, player.y) < 0.18) {
+        applyFriendlyFireHit(player);
+        return false;
+      }
+      if (p.shooter !== 2 && !player2.ghost &&
+          dist2(p.x, p.y, player2.x, player2.y) < 0.18) {
+        applyFriendlyFireHit(player2);
+        return false;
       }
     }
     // Hit chickens (friendly fire — sad)
@@ -3218,7 +4035,15 @@
           continue;
         }
         c.alive = false;
-        chickensKilledByPlayer++; // each shot docks a penalty that doubles every 10 waves
+        // Per-shooter tally drives each keeper's karma drift independently;
+        // the lifetime count feeds the end-of-run scoreboard.
+        if (p.shooter === 2) {
+          player2.chickensKilledThisWave++;
+          player2.chickensShot++;
+        } else {
+          chickensKilledByPlayer++;
+          player.chickensShot++;
+        }
         corpses.push({ x: c.x, y: c.y, kind: 'chicken', t: 4 });
         playChickenDeath();
         explodeChickenMaybe(c);
@@ -3236,6 +4061,9 @@
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     update(dt);
+    // Refresh player1's weapon-mirror on the player object so the keeper-draw
+    // helpers can read everything from one place.
+    syncP1Weapon();
     // Net sync runs even when update() bails out (paused / upgrade / gameOver)
     // so the guest keeps receiving fresh state and game-over propagates.
     if (gameStarted && multiplayer && conn && conn.open) {
@@ -3328,6 +4156,9 @@
     if (player.hurtT > 0) player.hurtT -= dt;
     if (player.meleeT > 0) player.meleeT -= dt;
     if (player2.hurtT > 0) player2.hurtT -= dt;
+    // Friendly-fire pellet-blast debounce — ticks down on both keepers.
+    if (player.bulletHitT > 0) player.bulletHitT -= dt;
+    if (player2.bulletHitT > 0) player2.bulletHitT -= dt;
 
     if (keys['r']) { keys['r'] = false; tryReload(); }
     if (reloadingT > 0) {
@@ -3362,6 +4193,40 @@
     // We just advance the local walk animation while the remote is moving.
     if (player2.active) {
       if (player2.moving) player2.walkT += dt * 12;
+      // Host runs player2's weapon timers + auto-fire here. The guest only
+      // mirrors timers from the snapshot, so it skips this block entirely.
+      if (isHost) {
+        if (player2.reloadT > 0) player2.reloadT -= dt;
+        if (player2.spinT > 0) player2.spinT -= dt;
+        if (player2.jamT > 0) player2.jamT -= dt;
+        if (player2.meleeT > 0) player2.meleeT -= dt;
+        if (player2.reloadingT > 0) {
+          player2.reloadingT -= dt;
+          if (player2.reloadingT <= 0 && lvlsFor(player2).machineGun > 0) {
+            player2.ammo = tableAtFor(player2, 'machineGun');
+          }
+        }
+        // Auto-fire while the guest is holding the mouse — machine-gun & sword.
+        const p2lvls = lvlsFor(player2);
+        if (p2lvls.machineGun > 0 && player2.mouseDown && !gameOver) tryShootP2();
+        if (p2lvls.sword >= 1 && player2.mouseDown && !gameOver) tryShootP2();
+        // Mag-dump tick.
+        if (player2.magDumpLeft > 0 && !gameOver) {
+          player2.magDumpT -= dt;
+          while (player2.magDumpT <= 0 && player2.magDumpLeft > 0 && player2.ammo > 0) {
+            fireBurstP2();
+            player2.ammo--;
+            player2.magDumpLeft--;
+            knockbackPlayer2(0.12);
+            spawnSmoke(player2.x + Math.cos(player2.dir) * 0.6, player2.y + Math.sin(player2.dir) * 0.6, 1);
+            player2.magDumpT += MAG_DUMP_INTERVAL;
+          }
+          if (player2.magDumpLeft <= 0 || player2.ammo <= 0) {
+            player2.magDumpLeft = 0;
+            startMGReloadP2();
+          }
+        }
+      }
     }
 
     // Camera follows player
@@ -3443,17 +4308,29 @@
 
     if (shake > 0) shake -= dt;
 
-    // HUD
+    // HUD — money column shows the local player's wallet (separate mode) or
+    // the shared pot (default). Gun status reflects the local keeper too.
     document.getElementById('stat-chickens').textContent = chickens.length;
     document.getElementById('stat-coops').textContent = coops.length;
-    document.getElementById('stat-money').textContent = '$' + money;
+    const hudIsGuest = multiplayer && !isHost;
+    const myMoney = (gameOpts.separateMoney && hudIsGuest) ? money2 : money;
+    let moneyStr = '$' + myMoney;
+    if (gameOpts.separateMoney && multiplayer) {
+      const otherMoney = hudIsGuest ? money : money2;
+      moneyStr = '$' + myMoney + ' (partner $' + otherMoney + ')';
+    }
+    document.getElementById('stat-money').textContent = moneyStr;
+    const localLvls   = hudIsGuest && gameOpts.individualUpgrades ? upgradeLevels2 : upgradeLevels;
+    const localAmmo   = hudIsGuest ? player.ammo : ammo;
+    const localChamb  = hudIsGuest ? player.chambered : chambered;
+    const localReload = hudIsGuest ? player.reloadingT : reloadingT;
     let gunStatus;
-    if (upgradeLevels.sword >= 1) gunStatus = 'sword';
+    if (localLvls.sword >= 1) gunStatus = 'sword';
     else if (player.jamT > 0) gunStatus = 'JAMMED';
-    else if (reloadingT > 0)  gunStatus = 'reloading…';
-    else if (upgradeLevels.machineGun > 0) gunStatus = 'ammo ' + ammo + '/' + tableAt('machineGun');
-    else if (chambered)       gunStatus = 'loaded';
-    else                      gunStatus = 'empty (press R)';
+    else if (localReload > 0)  gunStatus = 'reloading…';
+    else if (localLvls.machineGun > 0) gunStatus = 'ammo ' + localAmmo + '/' + SKILL_TABLES.machineGun[Math.min(localLvls.machineGun, 5)];
+    else if (localChamb)       gunStatus = 'loaded';
+    else                       gunStatus = 'empty (press R)';
     document.getElementById('stat-gun').textContent = gunStatus;
     document.getElementById('stat-kills').textContent = kills;
     document.getElementById('stat-wave').textContent = wave || '—';
@@ -3480,13 +4357,27 @@
 
     drawGround();
     drawEntities();
-    drawBuildPreview();
+    drawBuildPreview(player);
+    if (player2.active) drawBuildPreview(player2);
 
     ctx.restore();
 
     if (upgradeMode) {
-      if (multiplayer && !isHost) drawUpgradeWaitOverlay();
-      else drawUpgradeWindow();
+      if (multiplayer && !isHost) {
+        // Guest's view. A guest ghost skips its own pick — show a wait card.
+        if (player.ghost) drawUpgradeWaitOverlayGhost();
+        else if (gameOpts.individualUpgrades) drawUpgradeWindowP2();
+        else drawUpgradeWaitOverlay();
+      } else if (player.ghost) {
+        // Host is a ghost — they don't pick. Surface the same wait overlay
+        // so they know the partner is taking the upgrade.
+        drawUpgradeWaitOverlayGhost();
+      } else if (upgradePicked && multiplayer && isHost && gameOpts.individualUpgrades && !upgradePicked2) {
+        // Host has already picked but partner hasn't — show a wait overlay.
+        drawUpgradeWaitOverlayHostWait();
+      } else {
+        drawUpgradeWindow();
+      }
     } else if (multiplayer && !isHost && hostPaused) {
       // Surface the host's pause state so the guest knows why everything stopped.
       drawHostPausedOverlay();
@@ -3496,24 +4387,144 @@
       drawPauseWindow();
     }
 
-    if (gameOver) {
-      ctx.fillStyle = 'rgba(0,0,0,0.65)';
-      ctx.fillRect(0, 0, W, H);
-      ctx.fillStyle = '#fff';
-      ctx.textAlign = 'center';
-      ctx.font = 'bold 48px "Lucida Console", Consolas, monospace';
-      ctx.fillText('GAME OVER', W/2, H/2 - 20);
-      ctx.font = '20px "Lucida Console", Consolas, monospace';
-      // In multiplayer, pick the message from THIS client's POV.
-      let msg = gameOverMsg;
-      if (multiplayer && gameOverCause) {
+    if (gameOver) drawGameOverPanel();
+  }
+
+  // Side-by-side end-of-run scoreboard. In single-player only one column is
+  // shown. Stats are read off the keeper objects (kills, deaths, karma) plus
+  // each player's upgrade ladder (Longer Barrel range, fire rate, etc.) so
+  // both keepers can compare the run they just played.
+  function drawGameOverPanel() {
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.78)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 36px "Lucida Console", Consolas, monospace';
+    ctx.fillText('GAME OVER', W / 2, 60);
+    ctx.font = '14px "Lucida Console", Consolas, monospace';
+    ctx.fillStyle = '#d7d7d7';
+    let msg = gameOverMsg || 'Press Q for menu or F5 to restart.';
+    if (multiplayer && gameOverCause) {
+      if (gameOverCause === 'both') {
+        msg = 'Both keepers fell! Press Q for menu or F5 to restart.';
+      } else {
         const youDied = (gameOverCause === 'host' && isHost) || (gameOverCause === 'guest' && !isHost);
         msg = youDied
           ? 'A wolf knocked off your last hat! Press Q for menu or F5 to restart.'
           : 'Your partner fell to a wolf! Press Q for menu or F5 to restart.';
       }
-      ctx.fillText(msg, W/2, H/2 + 20);
     }
+    ctx.fillText(msg, W / 2, 88);
+    ctx.fillStyle = '#9aa0a8';
+    ctx.font = '11px "Lucida Console", Consolas, monospace';
+    ctx.fillText('Final wave: ' + (wave || '—') + '    Coops: ' + coops.length, W / 2, 108);
+
+    // Stats pulled per keeper. `player` is always the LOCAL keeper, `player2`
+    // is the partner — so column 1 = you, column 2 = partner regardless of
+    // whether this client is the host or the guest.
+    const showP2 = multiplayer && player2.active;
+    // Wallet mapping differs per side: on the host `money` is P1's pot and on
+    // the guest `money2` is P2's (the local) pot. In shared-money mode both
+    // sides see the same single `money` value.
+    const guestSide = multiplayer && !isHost;
+    const localWallet  = (gameOpts.separateMoney && guestSide) ? money2 : money;
+    const remoteWallet = (gameOpts.separateMoney && guestSide) ? money : money2;
+    function statsFor(who, wallet, hats) {
+      const lvls = lvlsFor(who);
+      // Longer Barrel reads in metres — each upgrade step adds 0.1 m of reach.
+      const barrelM = ((lvls.range || 0) * 0.1).toFixed(1) + ' m';
+      return {
+        Money:             '$' + wallet,
+        Hats:              String(hats),
+        'Wolves killed':   String(who.kills || 0),
+        'Chickens killed': String(who.chickensShot || 0),
+        Deaths:            String(who.deaths || 0),
+        'Longer Barrel':   barrelM + '  (lvl ' + (lvls.range || 0) + ')',
+        'Cause of death':  who.deathCause ? who.deathCause : '—',
+      };
+    }
+    const p1 = statsFor(player, localWallet, playerHats);
+    const p2 = showP2 ? statsFor(player2, remoteWallet, player2.hats || 0) : null;
+    const labels = Object.keys(p1);
+
+    // Layout — title row above, then label | P1 | P2 grid.
+    const rowH = 19;
+    const headerH = 30;
+    const panelW = showP2 ? Math.min(560, W - 32) : Math.min(360, W - 32);
+    const panelH = headerH + labels.length * rowH + 24;
+    const panelX = Math.round((W - panelW) / 2);
+    const panelY = 134;
+    ctx.fillStyle = 'rgba(15, 18, 24, 0.96)';
+    ctx.fillRect(panelX, panelY, panelW, panelH);
+    ctx.strokeStyle = '#ffd166';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(panelX + 1, panelY + 1, panelW - 2, panelH - 2);
+
+    // Column header. P1 / P2 labels reflect this client's POV.
+    const labelX = panelX + 16;
+    const colP1X = panelX + Math.round(panelW * 0.55);
+    const colP2X = panelX + Math.round(panelW * 0.82);
+    ctx.fillStyle = '#ffd166';
+    ctx.textAlign = 'left';
+    ctx.font = 'bold 13px "Lucida Console", Consolas, monospace';
+    ctx.fillText('SCOREBOARD', labelX, panelY + 18);
+    ctx.textAlign = 'right';
+    // Column 1 = local keeper; column 2 = partner. Label reflects each
+    // client's POV (the guest is "P2" in the lobby's role assignment).
+    const col1Tag = (multiplayer && !isHost) ? 'YOU (P2)' : (multiplayer ? 'YOU (P1)' : 'YOU');
+    const col2Tag = (multiplayer && !isHost) ? 'PARTNER (P1)' : 'PARTNER (P2)';
+    ctx.fillText(col1Tag, colP1X, panelY + 18);
+    if (showP2) ctx.fillText(col2Tag, colP2X, panelY + 18);
+
+    // Underline beneath the header row.
+    ctx.strokeStyle = 'rgba(255,209,102,0.4)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(panelX + 8, panelY + headerH - 2);
+    ctx.lineTo(panelX + panelW - 8, panelY + headerH - 2);
+    ctx.stroke();
+
+    // Data rows.
+    ctx.font = '13px "Lucida Console", Consolas, monospace';
+    for (let i = 0; i < labels.length; i++) {
+      const key = labels[i];
+      const y = panelY + headerH + 14 + i * rowH;
+      // Zebra striping.
+      if (i & 1) {
+        ctx.fillStyle = 'rgba(255,255,255,0.04)';
+        ctx.fillRect(panelX + 4, y - 13, panelW - 8, rowH);
+      }
+      ctx.fillStyle = '#9aa0a8';
+      ctx.textAlign = 'left';
+      ctx.fillText(key, labelX, y);
+      // Highlight which column wins for headline numeric stats.
+      const p1v = p1[key];
+      const p2v = p2 ? p2[key] : null;
+      const compareKeys = { Money: 1, 'Wolves killed': 1, Hats: 1, 'Chickens killed': -1, Deaths: -1 };
+      let p1Color = '#fff', p2Color = '#fff';
+      if (showP2 && compareKeys[key]) {
+        const a = parseFloat(String(p1v).replace(/[^\-0-9.]/g, '')) || 0;
+        const b = parseFloat(String(p2v).replace(/[^\-0-9.]/g, '')) || 0;
+        const dir = compareKeys[key]; // +1 = higher wins, -1 = lower wins
+        if (a * dir > b * dir)      { p1Color = '#7fdc7f'; p2Color = '#d7d7d7'; }
+        else if (b * dir > a * dir) { p1Color = '#d7d7d7'; p2Color = '#7fdc7f'; }
+      }
+      ctx.textAlign = 'right';
+      ctx.fillStyle = p1Color;
+      ctx.fillText(String(p1v), colP1X, y);
+      if (showP2) {
+        ctx.fillStyle = p2Color;
+        ctx.fillText(String(p2v), colP2X, y);
+      }
+    }
+
+    // Footer hint.
+    ctx.fillStyle = '#9aa0a8';
+    ctx.textAlign = 'center';
+    ctx.font = '12px "Lucida Console", Consolas, monospace';
+    ctx.fillText('Q — menu     F5 — restart', W / 2, panelY + panelH + 22);
+    ctx.restore();
   }
 
   function drawGround() {
@@ -3750,9 +4761,10 @@
     }
   }
 
-  function drawBuildPreview() {
-    if (!buildMode) return;
-    const target = getBuildTarget();
+  function drawBuildPreview(builder) {
+    builder = builder || player;
+    if (!builder.buildMode) return;
+    const target = getBuildTarget(builder);
     ctx.save();
     if (target.type === 'remove') {
       // Highlight the tile that would be cleared with a red X.
@@ -3814,6 +4826,104 @@
     }
     ctx.closePath();
     ctx.fill();
+  }
+
+  // Shown when the local keeper is a ghost — they sit out the upgrade phase
+  // while the surviving partner picks.
+  function drawUpgradeWaitOverlayGhost() {
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, W, H);
+    const w = Math.min(380, W - 24);
+    const h = 96;
+    const x = (W - w) / 2;
+    const y = (H - h) / 2;
+    ctx.fillStyle = 'rgba(15,18,24,0.96)';
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = '#ffd166';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+    ctx.fillStyle = '#ffd166';
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 22px "Lucida Console", Consolas, monospace';
+    ctx.fillText('No pick for ghosts', W / 2, y + 38);
+    ctx.fillStyle = '#d7d7d7';
+    ctx.font = '14px "Lucida Console", Consolas, monospace';
+    ctx.fillText('Your partner is choosing the upgrade…', W / 2, y + 66);
+    ctx.restore();
+  }
+
+  // Host-side: host has picked their upgrade but partner still hasn't.
+  function drawUpgradeWaitOverlayHostWait() {
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, W, H);
+    const w = Math.min(360, W - 24);
+    const h = 96;
+    const x = (W - w) / 2;
+    const y = (H - h) / 2;
+    ctx.fillStyle = 'rgba(15,18,24,0.96)';
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = '#ffd166';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+    ctx.fillStyle = '#ffd166';
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 22px "Lucida Console", Consolas, monospace';
+    ctx.fillText('Pick locked in', W / 2, y + 38);
+    ctx.fillStyle = '#d7d7d7';
+    ctx.font = '14px "Lucida Console", Consolas, monospace';
+    ctx.fillText('Waiting for partner to pick…', W / 2, y + 66);
+    ctx.restore();
+  }
+
+  // Guest-side: simplified upgrade window using P2's own option list. No
+  // star history / cross-locks (those mechanics live in the main pool which
+  // the host owns).
+  function drawUpgradeWindowP2() {
+    ctx.save();
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.68)';
+    ctx.fillRect(0, 0, W, H);
+    const panelW = Math.min(560, W - 24);
+    const panelH = 236;
+    const panelX = (W - panelW) / 2;
+    const panelY = (H - panelH) / 2 - 10;
+    ctx.fillStyle = 'rgba(15, 18, 24, 0.96)';
+    ctx.fillRect(panelX, panelY, panelW, panelH);
+    ctx.strokeStyle = '#ffd166';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(panelX + 1, panelY + 1, panelW - 2, panelH - 2);
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 28px "Lucida Console", Consolas, monospace';
+    ctx.fillText('Wave cleared', W / 2, panelY + 40);
+    ctx.font = '16px "Lucida Console", Consolas, monospace';
+    const sub = upgradePicked2 ? 'Waiting for partner…' : 'Pick your gun upgrade';
+    ctx.fillText(sub, W / 2, panelY + 68);
+    const rects = getUpgradeOptionRects();
+    for (let i = 0; i < rects.length; i++) {
+      const option = upgradeOptions2[i];
+      if (!option) continue;
+      const rect = rects[i];
+      const hovered = !upgradePicked2 && mouse.x >= rect.x && mouse.x <= rect.x + rect.w && mouse.y >= rect.y && mouse.y <= rect.y + rect.h;
+      ctx.fillStyle = hovered ? 'rgba(255, 209, 102, 0.24)' : 'rgba(255, 255, 255, 0.08)';
+      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      ctx.strokeStyle = hovered ? '#ffd166' : 'rgba(255,255,255,0.18)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(rect.x + 1, rect.y + 1, rect.w - 2, rect.h - 2);
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'left';
+      ctx.font = 'bold 16px "Lucida Console", Consolas, monospace';
+      ctx.fillText((i + 1) + '. ' + option.title, rect.x + 14, rect.y + 22);
+      ctx.font = '13px "Lucida Console", Consolas, monospace';
+      ctx.fillStyle = '#d7d7d7';
+      wrapText(option.desc(), rect.x + 14, rect.y + 56, rect.w - 28, 15);
+    }
+    ctx.fillStyle = '#9aa0a8';
+    ctx.textAlign = 'center';
+    ctx.font = '12px "Lucida Console", Consolas, monospace';
+    ctx.fillText('Click or press 1/2/3 to pick', W / 2, panelY + panelH - 14);
+    ctx.restore();
   }
 
   // Shown on the guest while the host is in their upgrade screen — read-only
@@ -4017,9 +5127,11 @@
     for (const w of wolves) if (w.alive) liveWolves++;
     const spreadDeg = (shotgunSpread * 180 / Math.PI).toFixed(1);
 
+    const pauseIsGuest = multiplayer && !isHost;
+    const pauseMyMoney = (gameOpts.separateMoney && pauseIsGuest) ? money2 : money;
     const statusItems = [
       ['Hats', playerHats],
-      ['Money', '$' + money],
+      ['Money', '$' + pauseMyMoney],
       ['Wave', wave || '—'],
       ['Wolves alive', liveWolves],
       ['Coops', coops.length],
@@ -4263,8 +5375,11 @@
 
   // Short wooden butt behind the body. Drawn BEFORE the body so the body
   // partially hides it (like a shouldered gun).
-  function drawKeeperStock(cx, gunY, gx, gy) {
-    if (upgradeLevels.sword >= 1) return; // no stock when carrying the sword
+  function drawKeeperStock(cx, gunY, gx, gy, keeper) {
+    // When given a keeper, respect that keeper's upgrade ladder (P2 in
+    // individual-upgrade mode may not have the sword even if P1 does).
+    const ulvls = keeper ? lvlsFor(keeper) : upgradeLevels;
+    if (ulvls.sword >= 1) return; // no stock when carrying the sword
     ctx.save();
     ctx.strokeStyle = '#7a4f25';
     ctx.lineWidth = 4;
@@ -4278,7 +5393,10 @@
 
   // Sword (Wolf's Blade) or shotgun + decorations + muzzle flash.
   function drawKeeperWeapon(keeper, cx, cy, gunY, gx, gy) {
-    if (upgradeLevels.sword >= 1) {
+    // Per-keeper upgrade ladder + chamber state — player2 has its own.
+    const ulvls = lvlsFor(keeper);
+    const cham = keeper.chambered;
+    if (ulvls.sword >= 1) {
       const px0 = -gy, py0 = gx;       // perpendicular to the blade
       const bladeLen = 24;
       ctx.lineCap = 'round';
@@ -4318,12 +5436,12 @@
       return;
     }
     // Barrel — uses the screen direction. Grows a touch with each Longer Barrel pick.
-    const barrelLength = 16 + upgradeLevels.range * 0.6;
+    const barrelLength = 16 + ulvls.range * 0.6;
     let barrelColor = '#2b2b2b';
     if (keeper.jamT > 0)              barrelColor = '#ff3c3c';
-    else if (upgradeLevels.rust >= 5) barrelColor = '#ffcf3a'; // golden gun
-    else if (upgradeLevels.rust > 0)  barrelColor = RUST_COLORS[upgradeLevels.rust];
-    else if (!chambered)              barrelColor = '#6a6a6a';
+    else if (ulvls.rust >= 5)         barrelColor = '#ffcf3a'; // golden gun
+    else if (ulvls.rust > 0)          barrelColor = RUST_COLORS[ulvls.rust];
+    else if (!cham)                   barrelColor = '#6a6a6a';
     ctx.strokeStyle = barrelColor;
     ctx.lineWidth = 3;
     ctx.beginPath();
@@ -4335,7 +5453,7 @@
     ctx.arc(cx + gx * 4, gunY + gy * 4, 2.5, 0, Math.PI * 2);
     ctx.fill();
     const px = -gy, py = gx;
-    if (upgradeLevels.spreadUp >= MAX_LEVEL) {
+    if (ulvls.spreadUp >= MAX_LEVEL) {
       // Loose Pattern MAX: muzzle flare into a funnel.
       const tipX = cx + gx * barrelLength, tipY = gunY + gy * barrelLength;
       const baseX = cx + gx * (barrelLength - 5), baseY = gunY + gy * (barrelLength - 5);
@@ -4347,7 +5465,7 @@
       ctx.lineTo(baseX - px * 1.5, baseY - py * 1.5);
       ctx.closePath();
       ctx.fill();
-    } else if (upgradeLevels.spreadDown >= MAX_LEVEL) {
+    } else if (ulvls.spreadDown >= MAX_LEVEL) {
       // Tighter Pattern MAX: scope on top.
       const mx2 = cx + gx * (barrelLength * 0.4), my2 = gunY + gy * (barrelLength * 0.4);
       const ax = mx2 + px * 4, ay = my2 + py * 4;
@@ -4365,7 +5483,7 @@
       ctx.arc(ax + gx * 3, ay + gy * 3, 1.3, 0, Math.PI * 2);
       ctx.fill();
     }
-    if (upgradeLevels.doubleBarrel > 0) {
+    if (ulvls.doubleBarrel > 0) {
       ctx.strokeStyle = barrelColor;
       ctx.lineWidth = 2.5;
       ctx.beginPath();
@@ -4373,7 +5491,7 @@
       ctx.lineTo(cx + gx * (barrelLength - 2) + px * 3, gunY + gy * (barrelLength - 2) + py * 3);
       ctx.stroke();
     }
-    if (upgradeLevels.machineGun > 0) {
+    if (ulvls.machineGun > 0) {
       let dnx = px, dny = py;
       if (dny < 0) { dnx = -dnx; dny = -dny; }
       const mbx = cx + gx * 5, mby = gunY + gy * 5;
@@ -4398,10 +5516,13 @@
     const HAT_STEP = 5;
     const hatTopY = hatCount > 0 ? cy - 38 - (hatCount - 1) * HAT_STEP : cy - 36;
     const badgeY = hatTopY - 7;
+    // Weapon state always lives on the keeper object.
+    const reloadingTv = keeper.reloadingT || 0;
+    const chamberedv  = keeper.chambered;
     let badgeColor;
     if (keeper.jamT > 0) badgeColor = (Math.floor(keeper.jamT * 12) & 1) ? '#ff3c3c' : '#3a0000';
-    else if (reloadingT > 0) badgeColor = '#ffd166';
-    else if (chambered) badgeColor = '#4be04b';
+    else if (reloadingTv > 0) badgeColor = '#ffd166';
+    else if (chamberedv) badgeColor = '#4be04b';
     else badgeColor = '#888';
     ctx.fillStyle = badgeColor;
     ctx.fillRect(cx - 2, badgeY, 4, 4);
@@ -4433,19 +5554,21 @@
     // While hurtT is active (just took a hit), the body parts flash red.
     const hurt = player.hurtT > 0;
     // On a guest client this function is rendering the guest keeper — the
-    // same character the host sees as player2. No gun, no status badge,
-    // straw hats to match the host's view.
+    // same character the host sees as player2. Both keepers now carry guns,
+    // so the stock/barrel/badge are drawn either way; the guest keeper uses
+    // its own (P2) weapon state when in individual-upgrade mode.
     const isGuestSelf = multiplayer && !isHost;
     // Pre-compute the gun's screen direction so the stock can be drawn BEFORE
     // the body (body partially hides the butt) while the barrel is drawn
     // afterward, on top.
     const gunVec = keeperGunVec(player, cy);
     const gx = gunVec.gx, gy = gunVec.gy, gunY = gunVec.gunY;
-    // Stock — drawn before the body. Guests have no gun, so it's hidden for
-    // the guest's view of their own keeper.
-    if (!isGuestSelf) drawKeeperStock(cx, gunY, gx, gy);
-    // Body
-    ctx.fillStyle = hurt ? '#ff5555' : playerShirtColor();
+    // `player` always represents the LOCAL keeper here, so its weapon fields
+    // hold the right state on either side of the wire (host sync vs guest
+    // snapshot apply, both write into player.chambered etc.). Ghosts skip.
+    if (!player.ghost) drawKeeperStock(cx, gunY, gx, gy, player);
+    // Body — shirt tint comes from this keeper's own karma.
+    ctx.fillStyle = hurt ? '#ff5555' : shirtColorOf(player);
     roundedRect(cx - 7, cy - 25, 14, 17, 3);
     // Head
     ctx.fillStyle = hurt ? '#ff8a8a' : '#f1c27d';
@@ -4471,12 +5594,12 @@
     ctx.fillStyle = hurt ? '#7a1a1a' : '#222';
     ctx.fillRect(cx - 5, cy - 10, 3, 8 - lLift);
     ctx.fillRect(cx + 2, cy - 10, 3, 8 - rLift);
-    // Weapon (sword or gun + decorations + muzzle flash) — hidden when this
-    // function is rendering the guest's own keeper (the guest carries nothing).
-    if (!isGuestSelf) drawKeeperWeapon(player, cx, cy, gunY, gx, gy);
-
-    // Gun-status indicator above the hat stack — same gating as the weapon.
-    if (!isGuestSelf) drawKeeperBadge(player, cx, cy, playerHats);
+    // Weapon (sword or gun + decorations + muzzle flash) — both keepers now
+    // carry a gun, so draw it for everyone. Ghosts wander empty-handed.
+    if (!player.ghost) {
+      drawKeeperWeapon(player, cx, cy, gunY, gx, gy);
+      drawKeeperBadge(player, cx, cy, playerHats);
+    }
     ctx.restore();
     // Melee-swing arc — drawn unscaled, around the player's torso.
     if (player.meleeT > 0) {
@@ -4514,15 +5637,16 @@
     ctx.scale(PLAYER_SCALE, PLAYER_SCALE);
     ctx.translate(-cx, -cy);
     const hurt = player2.hurtT > 0;
-    // Only the guest's screen shows the host (which carries the weapon).
-    // On the host's screen, player2 IS the guest (no weapon).
-    const showWeapon = multiplayer && !isHost;
+    // Both keepers now carry weapons — always draw player2's gun (unless they
+    // are a ghost), regardless of which side of the wire we're on.
+    const showWeapon = !player2.ghost;
     // Pre-compute gun vector so the stock can be drawn before the body.
     const gunVec = keeperGunVec(player2, cy);
     const gx = gunVec.gx, gy = gunVec.gy, gunY = gunVec.gunY;
-    if (showWeapon) drawKeeperStock(cx, gunY, gx, gy);
-    // Body — blue shirt by default, red flash on hit.
-    ctx.fillStyle = hurt ? '#ff5555' : '#3a6ea5';
+    if (showWeapon) drawKeeperStock(cx, gunY, gx, gy, player2);
+    // Body — shirt tint comes from player2's own karma so both keepers can
+    // read each other's morality at a glance.
+    ctx.fillStyle = hurt ? '#ff5555' : shirtColorOf(player2);
     roundedRect(cx - 7, cy - 25, 14, 17, 3);
     // Head
     ctx.fillStyle = hurt ? '#ff8a8a' : '#f1c27d';
@@ -4530,14 +5654,18 @@
     ctx.arc(cx, cy - 30, 6, 0, Math.PI * 2);
     ctx.fill();
     // Hat stack — same mechanic as player1: one per remaining HP.
-    // Colour by which role the OTHER keeper plays: the host sees player2 as
-    // the guest (straw hat); the guest sees player2 as the host (brown hat).
+    // Each client receives the host's authoritative hatColors array via the
+    // snapshot, so a Buy-Hat green hat shows up on both screens. Falls back
+    // to the role default (host's view of guest = straw; guest's view of an
+    // un-synced host = brown) when no array is available yet.
     const HAT_STEP = 5;
     const hatCount = Math.max(0, player2.hats || 0);
-    const p2HatColor = isHost ? GUEST_HAT_COLOR : '#5a3825';
+    const haveColors = Array.isArray(player2.hatColors) && player2.hatColors.length > 0;
+    const fallbackHat = isHost ? GUEST_HAT_COLOR : '#5a3825';
     for (let i = 0; i < hatCount; i++) {
       const by = cy - 34 - i * HAT_STEP;
-      ctx.fillStyle = hurt ? '#c0392b' : p2HatColor;
+      const baseHat = haveColors ? (player2.hatColors[i] || fallbackHat) : fallbackHat;
+      ctx.fillStyle = hurt ? '#c0392b' : baseHat;
       ctx.beginPath();
       ctx.ellipse(cx, by, 8, 2.5, 0, 0, Math.PI * 2);
       ctx.fill();
@@ -4790,9 +5918,13 @@
     }
     // Crops: taller and golden-headed as the farm nears harvest. Uses the
     // plot's locked-in stage count so the visual matches when it pays out.
+    // The visible growth window is 0..(need-1) — the harvest at growth=need
+    // resets the plot in the same tick, so the LAST rendered stage must
+    // already look fully ripe regardless of how short the cycle is.
     const total = fm.need || wavesToFinish();
-    const frac = total > 0 ? clamp(fm.growth / total, 0, 1) : 1;
-    const ripe = fm.growth >= total;
+    const lastStage = Math.max(1, total - 1);
+    const frac = clamp(fm.growth / lastStage, 0, 1);
+    const ripe = fm.growth >= lastStage;
     const spots = [[-0.42, -0.16], [0.42, -0.16], [0, 0.02], [-0.42, 0.22], [0.42, 0.22]];
     for (const s of spots) {
       const sx = cx + s[0] * hw, sy = cy + s[1] * hd;
@@ -5251,22 +6383,29 @@
   // Drop the current run and return to the title menu. Tears down any MP
   // connection, restores the ambient demo, and resets per-run state so the
   // next pick starts cleanly.
-  function quitToMenu() {
-    if (typeof teardownConnection === 'function') teardownConnection();
-    multiplayer = false;
-    isHost = false;
-    netRole = null;
-    player2.active = false;
-    // Overlay / pause / game-over state.
+  // Restart the current run without showing the menu — bound to F5 on the
+  // game-over screen. Multiplayer can't restart cleanly (peer is gone /
+  // partner would need their own restart), so it falls back to quitToMenu.
+  // Per-run state reset — drops gun progress, hats, money, etc. back to the
+  // first-wave defaults. Called by both quitToMenu (then surface the menu)
+  // and the MP restart path (which keeps the peer connection alive).
+  function resetRunState() {
     paused = false;
     upgradeMode = false;
     upgradeOptions = [];
+    upgradeOptions2 = [];
+    upgradePicked = false;
+    upgradePicked2 = false;
     upgradeDelayT = 0;
     gameOver = false;
     gameOverMsg = '';
     gameOverCause = '';
     buildMode = false;
-    // Per-run player state.
+    buildType = 0;
+    player.buildMode = false;
+    player.buildType = 0;
+    player.ghost = false;
+    player2.ghost = false;
     playerHats = START_HATS;
     hatColors.length = 0;
     for (let i = 0; i < START_HATS; i++) hatColors.push('#5a3825');
@@ -5282,6 +6421,19 @@
     magDumpLeft = 0;
     jamStreak = 0;
     karma = 0;
+    player.karma = 0;
+    player2.karma = 0;
+    player2.chickensKilledThisWave = 0;
+    player.bulletHitT = 0;
+    player2.bulletHitT = 0;
+    player.kills = 0;
+    player.deaths = 0;
+    player2.kills = 0;
+    player2.deaths = 0;
+    player.chickensShot = 0;
+    player2.chickensShot = 0;
+    player.deathCause = '';
+    player2.deathCause = '';
     hatPrice = 20;
     hatsBought = 0;
     swordWolfSlain = false;
@@ -5289,8 +6441,10 @@
     chickensKilledByPlayer = 0;
     wolfLevelCap = 0;
     dogGen = 1;
-    // Reset upgrades + derived stats so the gun matches level 0 again.
+    // Reset upgrade ladders + derived stats so guns match level 0 again.
     for (const k in upgradeLevels) upgradeLevels[k] = 0;
+    for (const k in upgradeLevels2) upgradeLevels2[k] = 0;
+    money2 = 10;
     shotgunLife = 0.30;
     shotgunCooldown = 0.75;
     shotgunSpread = 10 * Math.PI / 180;
@@ -5299,6 +6453,39 @@
     wolfRushSpeed = 1.0;
     recomputeJamChance();
     player.speed = 4.0;
+  }
+
+  // F5 path. In multiplayer it broadcasts a 'restart' beat to the partner
+  // so both clients clear their state and start a fresh game in the same
+  // lobby (no peer teardown, no menu detour). Single-player falls back to
+  // quitToMenu + startGame(false).
+  function restartRun() {
+    if (multiplayer && conn && conn.open) {
+      try { conn.send({ type: 'restart' }); } catch (e) {}
+      restartMpGame();
+      return;
+    }
+    quitToMenu();
+    startGame(false);
+  }
+
+  // Restart the multiplayer run in-place. Keeps the peer/connection alive
+  // and re-enters the game as if the guest had just joined. The host's next
+  // snapshot will resync everything.
+  function restartMpGame() {
+    resetRunState();
+    // startGame(true) wipes the world, re-spawns both keepers, etc.
+    startGame(true);
+    toast('Game restarted', 2.4);
+  }
+
+  function quitToMenu() {
+    if (typeof teardownConnection === 'function') teardownConnection();
+    multiplayer = false;
+    isHost = false;
+    netRole = null;
+    player2.active = false;
+    resetRunState();
     // Wipe the world and stand up the ambient backdrop.
     resetWorld();
     populateMenuDemo();
@@ -5329,6 +6516,7 @@
     player2.ghost = false;
     hostPaused = false;
     money = 10;
+    money2 = 10;
     kills = 0;
     wave = 0;
     waveTimer = 12;
@@ -5336,6 +6524,9 @@
     pendingSpawns = 0;
     coopsPlaced = 0;
     pendingMapExpansions = 0;
+    upgradeOptions2 = [];
+    upgradePicked2 = false;
+    for (const k in upgradeLevels2) upgradeLevels2[k] = 0;
   }
 
   // Lay down a small ambient farm — two coops with chickens wandering —
@@ -5453,6 +6644,7 @@
           if (!w.alive) continue;
           w.alive = false;
           kills++;
+          player.kills = (player.kills || 0) + 1;
           killed++;
           onWolfKilled(w);
           corpses.push({ x: w.x, y: w.y, kind: 'wolf', t: 5 });
@@ -5482,9 +6674,11 @@
         spawnBombWolf();
       } else if (action === 'karma-max') {
         karma = KARMA_MAX;
+        player.karma = KARMA_MAX;
         toast('Karma = +' + KARMA_MAX, 1.0);
       } else if (action === 'karma-min') {
         karma = -KARMA_MAX;
+        player.karma = -KARMA_MAX;
         toast('Karma = -' + KARMA_MAX, 1.0);
       } else if (action === 'spawn-wolf-fast') {
         spawnWolf();
@@ -5520,6 +6714,27 @@
         playerHats++;
         hatColors.push('#5a3825');
         toast('Hat added — ' + playerHats + ' hats', 0.6);
+      } else if (action === 'resurrect-self') {
+        // Brings the local keeper (or any ghost in single-player) back. In
+        // multiplayer the debug panel still only runs on the host's client,
+        // so this resurrects whichever keeper is a ghost.
+        if (player.ghost) {
+          reviveKeeper(player);
+          if (gameOver) {
+            gameOver = false;
+            gameOverMsg = '';
+            gameOverCause = '';
+          }
+        } else if (player2.active && player2.ghost) {
+          reviveKeeper(player2);
+          if (gameOver) {
+            gameOver = false;
+            gameOverMsg = '';
+            gameOverCause = '';
+          }
+        } else {
+          toast('Nobody to resurrect — neither keeper is a ghost', 1.2);
+        }
       } else if (action === 'apply-upgrade') {
         const id = btn.dataset.id;
         const opt = getUpgradePool().find(o => o.id === id);
@@ -5550,6 +6765,35 @@
       player2.y = player.y + 0.5;
       player2.hats = START_HATS;
       player2.hurtT = 0;
+      // Reset player2 weapon state for a fresh run.
+      player2.chambered = true;
+      player2.reloadingT = 0;
+      player2.ammo = 0;
+      player2.magDumpLeft = 0;
+      player2.magDumpT = 0;
+      player2.jamStreak = 0;
+      player2.spinDmg = false;
+      player2.reloadT = 0;
+      player2.jamT = 0;
+      player2.spinT = 0;
+      player2.meleeT = 0;
+      player2.speed = 4.0;
+      player2.buildMode = false;
+      player2.buildType = 0;
+      player2.karma = 0;
+      player2.chickensKilledThisWave = 0;
+      player2.bulletHitT = 0;
+      player2.kills = 0;
+      player2.deaths = 0;
+      player.kills = 0;
+      player.deaths = 0;
+      player.chickensShot = 0;
+      player2.chickensShot = 0;
+      player.deathCause = '';
+      player2.deathCause = '';
+      // P2 wallet + upgrade ladder start fresh too.
+      money2 = 10;
+      for (const k in upgradeLevels2) upgradeLevels2[k] = 0;
       // Send an initial position immediately so the peer can place us right away.
       netSendT = 0;
     } else {
@@ -5651,12 +6895,32 @@
     c.on('data', msg => {
       netLastRecv = performance.now(); // any traffic counts as alive
       if (!msg || typeof msg !== 'object') return;
+      // Either side: a peer pressed F5 to restart the run. Reset locally
+      // (without tearing down the connection) so both clients return to
+      // wave 1 in the same lobby.
+      if (msg.type === 'restart') {
+        restartMpGame();
+        return;
+      }
       // Guest → host: just the guest's keeper position.
       if (msg.type === 'pos' && player2.active) {
         player2.x = msg.x;
         player2.y = msg.y;
         player2.dir = msg.dir;
         player2.moving = !!msg.moving;
+        player2.mouseDown = !!msg.mouseDown;
+        return;
+      }
+      // Guest → host: a one-shot action (shoot, reload, magDump, doubleShot,
+      // upgrade pick). Host executes it for player2 — guest only renders.
+      if (msg.type === 'p2input' && isHost && player2.active) {
+        if (msg.action === 'shoot')      tryShootP2();
+        else if (msg.action === 'reload')    tryReloadP2();
+        else if (msg.action === 'doubleShot') doubleShotP2();
+        else if (msg.action === 'magDump')   magDumpP2();
+        else if (msg.action === 'upgrade')   selectUpgradeP2OnHost(msg.index | 0);
+        else if (msg.action === 'buildToggle') p2BuildToggle();
+        else if (msg.action === 'buildScroll') p2BuildScroll(msg.dir | 0);
         return;
       }
       // Host → guest: full world snapshot. Guest replaces local state wholesale.
@@ -5704,8 +6968,15 @@
         y: player.y,
         dir: player.dir,
         moving: !!player.moving,
+        mouseDown: !!mouse.down, // drives auto-fire for sword / machine-gun on host
       });
     } catch (e) { /* channel may be mid-teardown */ }
+  }
+  // Guest helper — forward a one-shot fire / reload / upgrade-pick action.
+  function sendP2Input(action, extra) {
+    if (!multiplayer || isHost || !conn || !conn.open) return;
+    try { conn.send(Object.assign({ type: 'p2input', action }, extra || {})); }
+    catch (e) {}
   }
 
   // ---------- Authoritative world snapshots (host → guest) ----------
@@ -5742,12 +7013,51 @@
         host: {
           x: player.x, y: player.y, dir: player.dir, moving: !!player.moving,
           walkT: player.walkT, hats: playerHats, hurtT: player.hurtT,
+          ghost: !!player.ghost, // host can now ghost too — sync the flag
+          karma: player.karma,    // per-player karma drives the shirt tint
+          kills: player.kills || 0,
+          deaths: player.deaths || 0,
+          chickensShot: player.chickensShot || 0,
+          deathCause: player.deathCause || '',
+          // Full hat-colour stack so the guest sees host's green-hats etc.
+          hatColors: hatColors.slice(),
+          buildMode: !!buildMode, // host's legacy build globals carry P1's state
+          buildType: buildType,
           // Weapon-animation timers so the guest can render the host's
           // gun/sword/melee swing with the right state every frame.
           reloadT: player.reloadT, jamT: player.jamT, spinT: player.spinT,
           meleeT: player.meleeT, meleeDir: player.meleeDir, meleeFull: !!player.meleeFull,
         },
         guest: { hats: player2.hats, hurtT: player2.hurtT, ghost: player2.ghost },
+        // Player2's authoritative weapon state, so the guest can render its
+        // own gun and the host can show it to the guest with the right look.
+        guestWeapon: {
+          chambered:   player2.chambered,
+          reloadingT:  player2.reloadingT,
+          ammo:        player2.ammo,
+          magDumpLeft: player2.magDumpLeft,
+          jamStreak:   player2.jamStreak,
+          spinDmg:     player2.spinDmg,
+          // Animation timers the guest's drawKeeperWeapon/Badge read directly.
+          reloadT:     player2.reloadT,
+          jamT:        player2.jamT,
+          spinT:       player2.spinT,
+          meleeT:      player2.meleeT,
+          meleeDir:    player2.meleeDir,
+          meleeFull:   !!player2.meleeFull,
+          karma:       player2.karma,
+          kills:       player2.kills || 0,
+          deaths:      player2.deaths || 0,
+          chickensShot: player2.chickensShot || 0,
+          deathCause:  player2.deathCause || '',
+          buildMode:   !!player2.buildMode,
+          buildType:   player2.buildType,
+        },
+        guestUpgrades: gameOpts.individualUpgrades ? Object.assign({}, upgradeLevels2) : null,
+        gameOpts: { friendlyFire: gameOpts.friendlyFire, separateMoney: gameOpts.separateMoney, individualUpgrades: gameOpts.individualUpgrades },
+        money2: money2,
+        guestUpgradeOptions: gameOpts.individualUpgrades ? upgradeOptions2.map(o => ({ id: o.id, title: o.title, desc: o.desc() })) : null,
+        guestUpgradePicked: !!upgradePicked2,
         // Mirror the host's overlay state so the guest's render matches.
         upgradeMode: upgradeMode,
         paused: paused,
@@ -5806,14 +7116,63 @@
       player2.meleeT = msg.host.meleeT || 0;
       player2.meleeDir = msg.host.meleeDir || 0;
       player2.meleeFull = !!msg.host.meleeFull;
+      // Host can ghost now too — mirror the flag so the guest renders the
+      // host translucently after they fall.
+      if (typeof msg.host.ghost === 'boolean') player2.ghost = msg.host.ghost;
+      if (typeof msg.host.karma === 'number') player2.karma = msg.host.karma;
+      if (typeof msg.host.kills === 'number') player2.kills = msg.host.kills;
+      if (typeof msg.host.deaths === 'number') player2.deaths = msg.host.deaths;
+      if (typeof msg.host.chickensShot === 'number') player2.chickensShot = msg.host.chickensShot;
+      if (typeof msg.host.deathCause === 'string') player2.deathCause = msg.host.deathCause;
+      // Host's hat-colour stack so the guest renders the host with the
+      // actual mix (green hats from Buy Hat, etc.).
+      if (Array.isArray(msg.host.hatColors)) player2.hatColors = msg.host.hatColors.slice();
+      if (typeof msg.host.buildMode === 'boolean') player2.buildMode = msg.host.buildMode;
+      if (typeof msg.host.buildType === 'number') player2.buildType = msg.host.buildType;
     }
     // Mirror the host's upgrade ladder + ammo/chamber state. Used by
     // drawPlayer2's weapon block and by entity rendering (coop chimneys,
     // fence spikes etc) so visuals match across both clients.
     if (msg.upgrades) Object.assign(upgradeLevels, msg.upgrades);
-    if (typeof msg.chambered === 'boolean') chambered = msg.chambered;
-    if (typeof msg.reloadingT === 'number') reloadingT = msg.reloadingT;
-    if (typeof msg.ammo === 'number') ammo = msg.ammo;
+    if (msg.guestUpgrades) Object.assign(upgradeLevels2, msg.guestUpgrades);
+    if (msg.gameOpts) Object.assign(gameOpts, msg.gameOpts);
+    if (typeof msg.money2 === 'number') money2 = msg.money2;
+    // Host's player1 chamber/reload/ammo — both as globals (for legacy code)
+    // and onto player2 (which on the guest represents the host's keeper).
+    if (typeof msg.chambered === 'boolean') { chambered = msg.chambered; player2.chambered = msg.chambered; }
+    if (typeof msg.reloadingT === 'number') { reloadingT = msg.reloadingT; player2.reloadingT = msg.reloadingT; }
+    if (typeof msg.ammo === 'number')       { ammo = msg.ammo; player2.ammo = msg.ammo; }
+    // Player2's weapon state (the GUEST's own keeper, as seen by the host).
+    if (msg.guestWeapon) {
+      player.chambered   = msg.guestWeapon.chambered;
+      player.reloadingT  = msg.guestWeapon.reloadingT;
+      player.ammo        = msg.guestWeapon.ammo;
+      player.magDumpLeft = msg.guestWeapon.magDumpLeft || 0;
+      player.jamStreak   = msg.guestWeapon.jamStreak || 0;
+      player.spinDmg     = !!msg.guestWeapon.spinDmg;
+      // Animation timers — drive the guest's own muzzle flash / gun spin /
+      // melee swing arc visuals.
+      player.reloadT     = msg.guestWeapon.reloadT || 0;
+      player.jamT        = msg.guestWeapon.jamT || 0;
+      player.spinT       = msg.guestWeapon.spinT || 0;
+      player.meleeT      = msg.guestWeapon.meleeT || 0;
+      player.meleeDir    = msg.guestWeapon.meleeDir || 0;
+      player.meleeFull   = !!msg.guestWeapon.meleeFull;
+      if (typeof msg.guestWeapon.karma === 'number') player.karma = msg.guestWeapon.karma;
+      if (typeof msg.guestWeapon.kills === 'number') player.kills = msg.guestWeapon.kills;
+      if (typeof msg.guestWeapon.deaths === 'number') player.deaths = msg.guestWeapon.deaths;
+      if (typeof msg.guestWeapon.chickensShot === 'number') player.chickensShot = msg.guestWeapon.chickensShot;
+      if (typeof msg.guestWeapon.deathCause === 'string') player.deathCause = msg.guestWeapon.deathCause;
+      if (typeof msg.guestWeapon.buildMode === 'boolean') player.buildMode = msg.guestWeapon.buildMode;
+      if (typeof msg.guestWeapon.buildType === 'number') player.buildType = msg.guestWeapon.buildType;
+    }
+    if (msg.guestUpgradeOptions) {
+      // Guest reconstructs lightweight upgrade options for its own picker.
+      upgradeOptions2 = msg.guestUpgradeOptions.map(o => ({
+        id: o.id, title: o.title, desc: () => o.desc,
+      }));
+    }
+    if (typeof msg.guestUpgradePicked === 'boolean') upgradePicked2 = msg.guestUpgradePicked;
     // Host echoes the guest's own hat count back so the guest sees its damage.
     if (msg.guest) {
       if (typeof msg.guest.hats === 'number') {
@@ -5921,6 +7280,24 @@
     showScreen('online');
   });
   document.getElementById('btnHost').addEventListener('click', () => hostLobby());
+  // Host-only toggles for the multiplayer rule set. Each click flips the
+  // value on the gameOpts object; the snapshot ships it to the guest once
+  // the lobby connects.
+  document.querySelectorAll('#lobbyOpts .lobby-opt').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const opt = btn.dataset.opt;
+      const on = btn.dataset.on === '1';
+      const next = !on;
+      btn.dataset.on = next ? '1' : '0';
+      gameOpts[opt] = next;
+      const labels = {
+        friendlyFire:       next ? 'ON' : 'OFF',
+        separateMoney:      next ? 'SEPARATE' : 'SHARED',
+        individualUpgrades: next ? 'INDIVIDUAL' : 'HOST PICKS',
+      };
+      btn.querySelector('.lobby-opt-val').textContent = labels[opt];
+    });
+  });
   document.getElementById('btnJoin').addEventListener('click', () => {
     setStatus(document.getElementById('joinStatus'), '');
     document.getElementById('joinCode').value = '';
