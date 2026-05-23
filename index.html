@@ -349,7 +349,7 @@
       <p class="menu-sub">Defend your flock from the wolves.</p>
       <button class="menu-btn menu-btn--primary" id="btnSingle">Single Player</button>
       <button class="menu-btn" id="btnMulti">Multiplayer</button>
-      <p class="menu-version">v0.6.0 <span class="by">·  made by ricardobertolin</span></p>
+      <p class="menu-version">v0.6.1 <span class="by">·  made by ricardobertolin</span></p>
     </section>
 
     <!-- Online lobby — pick a role -->
@@ -1143,31 +1143,36 @@
   const upgradeLevels2 = { jam: 0, range: 0, speed: 0, fireRate: 0, spreadUp: 0, spreadDown: 0, focusUp: 0, focusDown: 0, woodFence: 0, stoneWall: 0, reloadMove: 0, wolfDelay: 0, hatchRate: 0, spreadUp2: 0, spreadDown2: 0, doubleBarrel: 0, machineGun: 0, counter: 0, sprint: 0, softBullet: 0, hardBullet: 0, rust: 0, spinReload: 0, snatch: 0, fatChicken: 0, farm: 0, dog: 0, sword: 0 };
   // Pick the upgrade ladder that should govern a shooter's stats. With
   // individual upgrades off, both players share the host's tree.
+  // Pick the upgrade ladder that applies to `who`. The local `player` object
+  // represents a different lobby role on each client — on the host it's P1,
+  // on the guest it's P2 — so the mapping has to flip with `isHost`.
   function lvlsFor(who) {
-    if (gameOpts.individualUpgrades && who === player2) return upgradeLevels2;
-    return upgradeLevels;
+    if (!gameOpts.individualUpgrades) return upgradeLevels;
+    if (multiplayer && !isHost) {
+      // On the guest: `player` IS player2; `player2` represents the host.
+      return who === player ? upgradeLevels2 : upgradeLevels;
+    }
+    return who === player2 ? upgradeLevels2 : upgradeLevels;
   }
   function tableAtFor(who, id) {
     const lvls = lvlsFor(who);
     const t = SKILL_TABLES[id];
     return t[Math.min(lvls[id], t.length - 1)];
   }
-  // Derived shotgun stats for a given shooter — when individual upgrades are
-  // off these collapse to the legacy globals (shotgunLife / shotgunCooldown /
-  // shotgunSpread / pelletCount), so player1's existing code path is untouched.
+  // Derived shotgun stats for a given shooter — all routed through lvlsFor
+  // so each keeper renders / fires with its OWN ladder regardless of which
+  // side of the wire we're on.
   function shotgunLifeFor(who) {
-    if (!gameOpts.individualUpgrades || who === player) return shotgunLife;
-    return SKILL_TABLES.range[Math.min(upgradeLevels2.range, MAX_LEVEL)];
+    if (!gameOpts.individualUpgrades) return shotgunLife;
+    return SKILL_TABLES.range[Math.min(lvlsFor(who).range, MAX_LEVEL)];
   }
   function shotgunCooldownFor(who) {
-    if (!gameOpts.individualUpgrades || who === player) return shotgunCooldown;
-    return SKILL_TABLES.fireRate[Math.min(upgradeLevels2.fireRate, MAX_LEVEL)];
+    if (!gameOpts.individualUpgrades) return shotgunCooldown;
+    return SKILL_TABLES.fireRate[Math.min(lvlsFor(who).fireRate, MAX_LEVEL)];
   }
   function spreadStatsFor(who) {
-    if (!gameOpts.individualUpgrades || who === player) {
-      return { spread: shotgunSpread, count: pelletCount };
-    }
-    const l = upgradeLevels2;
+    if (!gameOpts.individualUpgrades) return { spread: shotgunSpread, count: pelletCount };
+    const l = lvlsFor(who);
     if (l.spreadUp > 0) {
       const i = Math.min(l.spreadUp + l.spreadUp2, LOOSE_SPREAD.length - 1);
       return { spread: LOOSE_SPREAD[i] * Math.PI / 180, count: LOOSE_BULLETS[i] };
@@ -1179,7 +1184,7 @@
     return { spread: 10 * Math.PI / 180, count: 4 };
   }
   function jamChanceFor(who) {
-    if (!gameOpts.individualUpgrades || who === player) return jamChance;
+    if (!gameOpts.individualUpgrades) return jamChance;
     return clamp(tableAtFor(who, 'jam') + tableAtFor(who, 'rust'), 0, 0.95);
   }
   // Run mechanic — walking with no shots and no reload builds a little momentum.
@@ -6632,6 +6637,22 @@
       const btn = e.target.closest('button[data-debug]');
       if (!btn) return;
       const action = btn.dataset.debug;
+      // Toggle-button (open/close the panel body) runs locally on either
+      // client — it's pure UI, no game state.
+      // The rest of the panel mutates host-authoritative state. From the
+      // guest we forward the click to the host and let them apply it; the
+      // next snapshot will reflect the change on the guest's screen.
+      if (multiplayer && !isHost && conn && conn.open) {
+        try {
+          conn.send({
+            type: 'debug-action',
+            action: action,
+            amount: btn.dataset.amount,
+            id: btn.dataset.id,
+          });
+        } catch (_) {}
+        return;
+      }
       if (action === 'money-add') {
         money += parseInt(btn.dataset.amount, 10);
         toast('+$' + btn.dataset.amount, 0.6);
@@ -6900,6 +6921,22 @@
       // wave 1 in the same lobby.
       if (msg.type === 'restart') {
         restartMpGame();
+        return;
+      }
+      // Guest → host: forwarded debug-panel click. Stitch up a throwaway
+      // button with the same dataset and click it, so the host's existing
+      // root click handler runs the action exactly as if the host pressed it.
+      if (msg.type === 'debug-action' && isHost) {
+        const root = document.getElementById('debug');
+        if (!root) return;
+        const btn = document.createElement('button');
+        btn.dataset.debug = msg.action || '';
+        if (msg.amount != null) btn.dataset.amount = msg.amount;
+        if (msg.id != null)     btn.dataset.id = msg.id;
+        btn.style.display = 'none';
+        root.appendChild(btn);
+        btn.click();
+        root.removeChild(btn);
         return;
       }
       // Guest → host: just the guest's keeper position.
